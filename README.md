@@ -1,8 +1,12 @@
 # @nettrek/c2pa-hls-bridge
 
 A lightweight integration layer that connects **C2PA WebAssembly verification** with **HLS.js** at fragment-level.  
-It enables real-time validation of signed media segments using C2PA manifests while streaming via HLS.  
+It enables real-time validation of signed media segments using C2PA manifests while streaming via HLS.    
+
+---
+
 Demo: [0.1.0 build](https://clients.nettrek.de/wdr/c2pa-hls-bridge/0.1.0/)
+
 ---
 
 ## Features

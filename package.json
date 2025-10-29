@@ -4,8 +4,13 @@
   "description": "",
   "main": "src/index.ts",
   "author": "Florian Diesner",
-  "license": "netTrek Commercial, see LICENSE",
-  "private": true,
+  "license": "MIT",
+  "keywords": [
+    "c2pa",
+    "hls.js",
+    "video",
+    "streaming"
+  ],
   "homepage": "https://www.nettrek.de",
   "exports": {
     ".": {
