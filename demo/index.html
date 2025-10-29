@@ -1,0 +1,376 @@
+<!doctype html>
+<html lang="de">
+<head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    <title>C2PA <> hls.js Bridge Demo</title>
+    <style>
+        :root {
+            --bg: #0b0f14;
+            --panel: #121821;
+            --text: #e6edf3;
+            --muted: #9aa7b2;
+            --accent: #3aa3ff;
+            --ok: #35c46a;
+            --bad: #ff6b6b;
+            --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        }
+
+        html, body {
+            height: 100%;
+        }
+
+        body {
+            margin: 0;
+            background: var(--bg);
+            color: var(--text);
+            font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+        }
+
+        .wrap {
+            max-width: 1100px;
+            margin: 32px auto;
+            padding: 0 16px;
+        }
+
+        h1 {
+            font-size: 18px;
+            font-weight: 600;
+            margin: 0 0 12px;
+            color: var(--text);
+        }
+
+        .video-card {
+            background: var(--panel);
+            border: 1px solid #1e2631;
+            border-radius: 14px;
+            overflow: hidden;
+            box-shadow: 0 8px 30px rgba(0, 0, 0, .25);
+        }
+
+        .video-aspect {
+            position: relative;
+            width: 100%;
+            padding-top: 56.25%;
+        }
+
+        video {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            background: #000;
+            display: block;
+        }
+
+        /* Controls row */
+        .row {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            padding: 12px;
+            border-top: 1px solid #1e2631;
+        }
+
+        button, input[type="text"] {
+            background: #0f1520;
+            border: 1px solid #243041;
+            color: var(--text);
+            border-radius: 10px;
+            padding: 8px 12px;
+            font: inherit;
+        }
+
+        button:hover {
+            border-color: var(--accent);
+            cursor: pointer;
+        }
+
+        .grow {
+            flex: 1 1 auto;
+        }
+
+        .console {
+            margin-top: 14px;
+            background: #0f1520;
+            border: 1px solid #1e2631;
+            border-radius: 12px;
+        }
+
+        .console h2 {
+            margin: 10px 12px;
+            font-size: 13px;
+            color: var(--muted);
+        }
+
+        .console pre {
+            margin: 0;
+            padding: 12px;
+            max-height: 220px;
+            overflow: auto;
+            font-family: var(--mono);
+            font-size: 12px;
+            line-height: 1.35;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        /* Dreispaltiges Grid */
+        .grid {
+            margin-top: 14px;
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 14px;
+        }
+
+        .card {
+            background: var(--panel);
+            border: 1px solid #1e2631;
+            border-radius: 12px;
+            padding: 12px;
+        }
+
+        .card h3 {
+            margin: 0 0 8px;
+            font-size: 14px;
+            color: var(--muted);
+            font-weight: 600;
+        }
+
+        .jsonbox {
+            font-family: var(--mono);
+            font-size: 12px;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        .labels {
+            display: grid;
+            gap: 8px;
+        }
+
+        .label {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #0f1520;
+            border: 1px solid #1e2631;
+            border-radius: 10px;
+            padding: 8px 10px;
+            font-size: 13px;
+        }
+
+        .label .k {
+            color: var(--muted);
+        }
+
+        .label .v {
+            font-weight: 600;
+        }
+
+        .label .v[data-value="true"] {
+            color: var(--ok);
+        }
+
+        .label .v[data-value="false"] {
+            color: var(--bad);
+        }
+
+        @media (max-width: 900px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+<div class="wrap">
+    <h1>C2PA <> hls.js Bridge Demo</h1>
+
+    <div class="video-card">
+        <div class="video-aspect">
+            <video id="video" controls playsinline muted></video>
+        </div>
+        <div class="row">
+            <input id="src" class="grow" type="text" placeholder="Put m3u8 url here (or use ?src=... in url)"/>
+            <button id="load">load</button>
+            <button id="play">play</button>
+            <button id="pause">pause</button>
+        </div>
+        <div class="row">
+            <button onclick="location.search='?src=https://ccavmedia-dd.akamaized.net/c2pa/reuls/master.m3u8'">Default
+            </button>
+            <button onclick="location.search='?src=https://ccavmedia-dd.akamaized.net/c2pa/reuls/media_1.m3u8'">Default
+                Video Only
+            </button>
+            <button onclick="location.search='?src=https://ccavmedia-dd.akamaized.net/c2pa/reuls/fail/master.m3u8'">Fail
+                &lt;1min
+            </button>
+            <button onclick="location.search='?src=https://ccavmedia-dd.akamaized.net/c2pa/reuls/fail/media_1.m3u8'">
+                Fail Video Only
+            </button>
+        </div>
+    </div>
+
+    <div class="console">
+        <h2>Console</h2>
+        <pre id="log" aria-live="polite"></pre>
+    </div>
+
+    <div class="grid">
+        <div class="card">
+            <h3>Manifest-Store</h3>
+            <pre id="json1" class="jsonbox">{}</pre>
+        </div>
+        <div class="card">
+            <h3>Validation Errors</h3>
+            <pre id="json2" class="jsonbox">{}</pre>
+        </div>
+        <div class="card">
+            <h3 id="lbl-head-status">Status</h3>
+            <div id="labels" class="labels">
+                <div class="label"><span class="k">Contains signature?</span><span class="v" id="lbl-hasSignature"
+                                                                                   data-value="false">false</span></div>
+                <div class="label"><span class="k">Is valid?</span><span class="v" id="lbl-isValid" data-value="false">false</span>
+                </div>
+                <div class="label"><span class="k">Has validation errors?</span><span class="v" id="lbl-hasError"
+                                                                                      data-value="false">false</span>
+                </div>
+                <div class="label"><span class="k">Contains AI?</span><span class="v" id="lbl-isAiGenerated"
+                                                                            data-value="false">false</span></div>
+                <div class="label"><span class="k">Issuer</span><span class="v" id="lbl-issuer"
+                                                                      data-value="false">false</span></div>
+                <div class="label"><span class="k">Signature time</span><span class="v" id="lbl-time"
+                                                                              data-value="false">false</span></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+<script type="module">
+    import {C2paHlsBridge} from "./index.js";
+
+    // —— Mini Logger ——
+    const $log = document.getElementById('log');
+
+    function log(...args) {
+        const time = new Date().toLocaleTimeString();
+        const line = `[${time}] ` + args.map(a => {
+            try {
+                return typeof a === 'string' ? a : JSON.stringify(a);
+            } catch {
+                return String(a);
+            }
+        }).join(' ');
+        $log.textContent += line + "\n";
+        $log.scrollTop = $log.scrollHeight;
+        console.log(...args);
+    }
+
+    // —— JSON Helper ——
+    function setJSON(which = 1, obj = {}) {
+        const el = document.getElementById(which === 1 ? 'json1' : 'json2');
+        el.textContent = JSON.stringify(obj, null, 2);
+    }
+
+    // —— Label Helper ——
+    function setLabel(key, value) {
+        const id = `lbl-${key}`;
+        const el = document.getElementById(id);
+        if (!el) return log('Label not found:', id);
+
+        let val = value;
+        el.dataset.value = String(val);
+        el.textContent = String(val);
+    }
+
+    // —— HLS Setup ——
+    const video = document.getElementById('video');
+    const input = document.getElementById('src');
+    const btnLoad = document.getElementById('load');
+    const btnPlay = document.getElementById('play');
+    const btnPause = document.getElementById('pause');
+
+    // URL Parameter
+    const params = new URLSearchParams(location.search);
+    const defaultSrc = 'https://ccavmedia-dd.akamaized.net/c2pa/reuls/master.m3u8';
+
+    const initialSrc = params.get('src') || defaultSrc;
+    input.value = initialSrc;
+
+    let hls, c2paBridge;
+
+    function load(src) {
+        if (hls) {
+            hls.destroy();
+            hls = null;
+        }
+        if (Hls.isSupported()) {
+            hls = new Hls({enableWorker: true});
+
+            // bridge integration start
+            c2paBridge = new C2paHlsBridge({
+                enableTrustListVerification: false
+            }, hls)
+            // bridge integration end
+
+            hls.on(Hls.Events.MEDIA_ATTACHED, () => log('HLS MEDIA_ATTACHED'));
+            hls.on(Hls.Events.MANIFEST_PARSED, (_e, data) => {
+                log('HLS MANIFEST_PARSED | Levels:', data?.levels?.length ?? 0);
+                try {
+                    video.play();
+                } catch {
+                }
+            });
+            hls.on(Hls.Events.ERROR, (_e, data) => log('HLS ERROR', data?.type, data?.details));
+            hls.loadSource(src);
+            hls.attachMedia(video);
+        } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+            log('detected native hls');
+            video.src = src;
+            video.addEventListener('loadedmetadata', () => video.play().catch(() => {
+            }), {once: true});
+        } else {
+            log('hls not supported');
+        }
+    }
+
+    // Video-Event Logging (ein paar wichtige Events)
+    ['play', 'pause', 'waiting', 'seeking', 'seeked', 'stalled', 'error', 'loadedmetadata', 'canplay'].forEach(ev => {
+        video.addEventListener(ev, () => log('VIDEO', ev, {
+            currentTime: Number(video.currentTime.toFixed(2)),
+            paused: video.paused,
+            readyState: video.readyState
+        }));
+    });
+
+    btnLoad.addEventListener('click', () => load(input.value.trim()));
+    btnPlay.addEventListener('click', () => video.play().catch(err => log('Play error', err?.message)));
+    btnPause.addEventListener('click', () => video.pause());
+
+    // update c2pa data from the video
+    video.addEventListener('timeupdate', (e) => {
+        let curTime = Number(video.currentTime)
+        let c2paReader = c2paBridge.getC2PAMetaByTimeCode(curTime)
+
+        setLabel('hasSignature', c2paReader.containsSignature())
+        setLabel('isValid', c2paReader.isValid())
+        setLabel('isAiGenerated', c2paReader.containsAIGeneratedContent())
+        setLabel('hasError', c2paReader.getValidationErrors().length > 0)
+
+        const activeManifest = c2paReader.getActiveManifest()
+        setLabel('issuer', activeManifest.signature_info.issuer || 'unknown')
+        setLabel('time', activeManifest.signature_info.time || 'unknown')
+
+        setLabel('head-status', `Status for pos. ${curTime.toFixed(2)}`)
+
+        setJSON(1, JSON.parse(c2paReader.toString()))
+        setJSON(2, c2paReader.getValidationErrors())
+    })
+
+    // initial load
+    load(initialSrc);
+</script>
+</body>
+</html>
