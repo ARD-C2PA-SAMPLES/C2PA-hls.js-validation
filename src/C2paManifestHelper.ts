@@ -56,7 +56,7 @@ export class C2paManifestHelper {
      * Returns any validation errors associated with the manifest.
      */
     getValidationErrors (): ValidationStatus[] {
-        if (!this.containsSignature) {
+        if (!this.containsSignature()) {
             return [{
                 code: 'not-found',
                 url: '',
@@ -172,12 +172,4 @@ export class C2paManifestHelper {
         }, 4)
     }
 
-    // Optional debugging method (currently unused)
-    // private parseResult(): void {
-    //     if (!this.containsSignature) return
-    //     for (const key in this.result.manifestStore?.manifests) {
-    //         const manifest = this.result.manifestStore?.manifests[key]
-    //         console.log(manifest)
-    //     }
-    // }
 }
