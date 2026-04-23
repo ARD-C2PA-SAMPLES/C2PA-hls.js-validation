@@ -51,7 +51,7 @@ export class AbstractC2PABridge implements NamedLogger, C2paBridge {
     constructor (config: C2PAConfig = {
         enableTrustListVerification: false
     }) {
-        withNamedLogger(this, 'AbstractC2PABridge')
+        withNamedLogger(this, this.constructor.name)
         this.config = config
         this.initC2PA()
     }
