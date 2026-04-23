@@ -14,6 +14,11 @@ import wasmAssetUrl from '@contentauth/c2pa-web/resources/c2pa.wasm'
 
 export interface C2PAConfig {
     enableTrustListVerification: boolean
+    /**
+     * Override the WASM source URL. Use this when your bundler (e.g. Vite) rewrites
+     * the default URL and causes an integrity mismatch.
+     */
+    wasmSrc?: string
 }
 
 export interface C2paBridge {
@@ -132,7 +137,7 @@ export class AbstractC2PABridge implements NamedLogger, C2paBridge {
                 if (this.config.enableTrustListVerification) {
                     this.c2paTookitSettings = await this.getToolkitSettings()
                 }
-                this.c2pa = await createC2pa({ wasmSrc: wasmAssetUrl, settings: this.c2paTookitSettings ?? undefined })
+                this.c2pa = await createC2pa({ wasmSrc: this.config.wasmSrc ?? wasmAssetUrl, settings: this.c2paTookitSettings ?? undefined })
 
                 this.log('C2PA runtime initialized', this.c2paTookitSettings)
                 this.onRuntimeReady()
