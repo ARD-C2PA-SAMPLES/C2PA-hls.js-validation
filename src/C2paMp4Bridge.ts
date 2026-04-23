@@ -26,8 +26,8 @@ export class C2paMp4Bridge extends AbstractC2PABridge {
     }
 
     override getTamperedWithIntervals (): Interval[] {
-        // returns max length to match api
-        return [new Interval(0, Number.MAX_SAFE_INTEGER)]
+        if (!this.#manifestReader) return []
+        return this.#manifestReader.isValid() ? [] : [new Interval(0, Number.MAX_SAFE_INTEGER)]
     }
 
     override dispose (): void {
