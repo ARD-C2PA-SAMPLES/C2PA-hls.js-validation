@@ -1,6 +1,6 @@
 {
   "name": "@nettrek/c2pa-hls-bridge",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "",
   "main": "src/index.ts",
   "author": "Florian Diesner",
