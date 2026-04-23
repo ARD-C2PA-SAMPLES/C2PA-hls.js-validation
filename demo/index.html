@@ -142,6 +142,8 @@
             font-size: 12px;
             white-space: pre-wrap;
             word-break: break-word;
+            max-height: 300px;
+            overflow: auto;
         }
 
         .labels {
@@ -198,17 +200,10 @@
             <button id="pause">pause</button>
         </div>
         <div class="row">
-            <button onclick="location.search='?src=https://ccavmedia-dd.akamaized.net/c2pa/reuls/master.m3u8'">Default
-            </button>
-            <button onclick="location.search='?src=https://ccavmedia-dd.akamaized.net/c2pa/reuls/media_1.m3u8'">Default
-                Video Only
-            </button>
-            <button onclick="location.search='?src=https://ccavmedia-dd.akamaized.net/c2pa/reuls/fail/master.m3u8'">Fail
-                &lt;1min
-            </button>
-            <button onclick="location.search='?src=https://ccavmedia-dd.akamaized.net/c2pa/reuls/fail/media_1.m3u8'">
-                Fail Video Only
-            </button>
+            <button id="btn-default">Default</button>
+            <button id="btn-default-video">Default Video Only</button>
+            <button id="btn-fail">Fail &lt;1min</button>
+            <button id="btn-fail-video">Fail Video Only</button>
         </div>
     </div>
 
@@ -253,6 +248,7 @@
 
     // —— Mini Logger ——
     const $log = document.getElementById('log');
+    const LOG_MAX_LINES = 200;
 
     function log(...args) {
         const time = new Date().toLocaleTimeString();
@@ -263,7 +259,9 @@
                 return String(a);
             }
         }).join(' ');
-        $log.textContent += line + "\n";
+        const lines = $log.textContent.split('\n');
+        if (lines.length > LOG_MAX_LINES) lines.splice(0, lines.length - LOG_MAX_LINES);
+        $log.textContent = lines.join('\n') + line + '\n';
         $log.scrollTop = $log.scrollHeight;
         console.log(...args);
     }
@@ -279,10 +277,8 @@
         const id = `lbl-${key}`;
         const el = document.getElementById(id);
         if (!el) return log('Label not found:', id);
-
-        let val = value;
-        el.dataset.value = String(val);
-        el.textContent = String(val);
+        el.dataset.value = String(value);
+        el.textContent = String(value);
     }
 
     // —— HLS Setup ——
@@ -292,10 +288,22 @@
     const btnPlay = document.getElementById('play');
     const btnPause = document.getElementById('pause');
 
+    const PRESETS = {
+        'btn-default':       'https://ccavmedia-dd.akamaized.net/c2pa/reuls/master.m3u8',
+        'btn-default-video': 'https://ccavmedia-dd.akamaized.net/c2pa/reuls/media_1.m3u8',
+        'btn-fail':          'https://ccavmedia-dd.akamaized.net/c2pa/reuls/fail/master.m3u8',
+        'btn-fail-video':    'https://ccavmedia-dd.akamaized.net/c2pa/reuls/fail/media_1.m3u8',
+    };
+    Object.entries(PRESETS).forEach(([id, src]) => {
+        document.getElementById(id)?.addEventListener('click', () => {
+            input.value = src;
+            load(src);
+        });
+    });
+
     // URL Parameter
     const params = new URLSearchParams(location.search);
-    const defaultSrc = 'https://ccavmedia-dd.akamaized.net/c2pa/reuls/master.m3u8';
-
+    const defaultSrc = PRESETS['btn-default'];
     const initialSrc = params.get('src') || defaultSrc;
     input.value = initialSrc;
 
@@ -312,16 +320,13 @@
             // bridge integration start
             c2paBridge = new C2paHlsBridge({
                 enableTrustListVerification: false
-            }, hls)
+            }, hls);
             // bridge integration end
 
             hls.on(Hls.Events.MEDIA_ATTACHED, () => log('HLS MEDIA_ATTACHED'));
             hls.on(Hls.Events.MANIFEST_PARSED, (_e, data) => {
                 log('HLS MANIFEST_PARSED | Levels:', data?.levels?.length ?? 0);
-                try {
-                    video.play();
-                } catch {
-                }
+                video.play().catch(() => {});
             });
             hls.on(Hls.Events.ERROR, (_e, data) => log('HLS ERROR', data?.type, data?.details));
             hls.loadSource(src);
@@ -329,14 +334,13 @@
         } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
             log('detected native hls');
             video.src = src;
-            video.addEventListener('loadedmetadata', () => video.play().catch(() => {
-            }), {once: true});
+            video.addEventListener('loadedmetadata', () => video.play().catch(() => {}), {once: true});
         } else {
             log('hls not supported');
         }
     }
 
-    // Video-Event Logging (ein paar wichtige Events)
+    // Video-Event Logging
     ['play', 'pause', 'waiting', 'seeking', 'seeked', 'stalled', 'error', 'loadedmetadata', 'canplay'].forEach(ev => {
         video.addEventListener(ev, () => log('VIDEO', ev, {
             currentTime: Number(video.currentTime.toFixed(2)),
@@ -349,25 +353,31 @@
     btnPlay.addEventListener('click', () => video.play().catch(err => log('Play error', err?.message)));
     btnPause.addEventListener('click', () => video.pause());
 
-    // update c2pa data from the video
-    video.addEventListener('timeupdate', (e) => {
-        let curTime = Number(video.currentTime)
-        let c2paReader = c2paBridge.getC2PAMetaByTimeCode(curTime)
+    // —— C2PA status update, throttled to 500 ms ——
+    let lastC2paUpdate = 0;
+    video.addEventListener('timeupdate', () => {
+        const now = Date.now();
+        if (now - lastC2paUpdate < 500) return;
+        lastC2paUpdate = now;
 
-        setLabel('hasSignature', c2paReader.containsSignature())
-        setLabel('isValid', c2paReader.isValid())
-        setLabel('isAiGenerated', c2paReader.containsAIGeneratedContent())
-        setLabel('hasError', c2paReader.getValidationErrors().length > 0)
+        if (!c2paBridge) return;
+        const curTime = Number(video.currentTime);
+        const c2paReader = c2paBridge.getC2PAMetaByTimeCode(curTime);
+        if (!c2paReader) return;
 
-        const activeManifest = c2paReader.getActiveManifest()
-        setLabel('issuer', activeManifest.signature_info.issuer || 'unknown')
-        setLabel('time', activeManifest.signature_info.time || 'unknown')
+        setLabel('hasSignature', c2paReader.containsSignature());
+        setLabel('isValid', c2paReader.isValid());
+        setLabel('isAiGenerated', c2paReader.containsAIGeneratedContent());
+        setLabel('hasError', c2paReader.getValidationErrors().length > 0);
 
-        setLabel('head-status', `Status for pos. ${curTime.toFixed(2)}`)
+        const activeManifest = c2paReader.getActiveManifest();
+        setLabel('issuer', activeManifest?.signature_info?.issuer || 'unknown');
+        setLabel('time', activeManifest?.signature_info?.time || 'unknown');
+        setLabel('head-status', `Status for pos. ${curTime.toFixed(2)}`);
 
-        setJSON(1, JSON.parse(c2paReader.toString()))
-        setJSON(2, c2paReader.getValidationErrors())
-    })
+        setJSON(1, JSON.parse(c2paReader.toString()));
+        setJSON(2, c2paReader.getValidationErrors());
+    });
 
     // initial load
     load(initialSrc);
