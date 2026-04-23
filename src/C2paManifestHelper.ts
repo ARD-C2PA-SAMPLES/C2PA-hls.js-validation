@@ -8,7 +8,7 @@
 import {
     type Manifest, type ManifestStore
 } from '@contentauth/c2pa-web'
-import { type ValidationStatus } from '@contentauth/c2pa-types/types/ManifestStore'
+import { type ValidationStatus } from '@contentauth/c2pa-web'
 import { containsGenerativeContent } from './utils/containsGenerativeContent'
 
 /**
@@ -77,7 +77,7 @@ export class C2paManifestHelper {
     getActiveManifest (): Manifest | null {
         const activeManifestId = this.store?.active_manifest ?? null
         if (!activeManifestId) return null
-        return this.store?.manifests[activeManifestId] ?? null
+        return this.store?.manifests?.[activeManifestId] ?? null
     }
 
     /**
@@ -91,7 +91,7 @@ export class C2paManifestHelper {
         let manifestToUse = manifest
         if (!manifestToUse) {
             if (this.store?.active_manifest !== null && this.store?.active_manifest !== undefined) {
-                manifestToUse = this.store?.manifests[this.store?.active_manifest]
+                manifestToUse = this.store?.manifests?.[this.store.active_manifest]
             }
         }
         if (!manifestToUse) return null
@@ -130,7 +130,7 @@ export class C2paManifestHelper {
         const activeManifestId = this.store?.active_manifest ?? null
         if (!activeManifestId) return 'unknown'
 
-        const activeManifest = this.store?.manifests[activeManifestId]
+        const activeManifest = this.store?.manifests?.[activeManifestId]
         if (!activeManifest) return 'unknown'
 
         switch (item) {
