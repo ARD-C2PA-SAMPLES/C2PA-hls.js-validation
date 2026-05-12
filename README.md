@@ -145,27 +145,42 @@ interface TrustSettings {
 
 ```typescript
 class C2paManifestHelper {
+  // Signature & validation
   containsSignature(): boolean
-  isValid(): boolean
-  containsAIGeneratedContent(): boolean
+  getManifestStoreValidationState(): ValidationState | null   // "Valid" | "Trusted" | "Invalid"
+  getActiveManifestValidationState(): ValidationState | null  // alias for the above
+  isValid(): boolean                                          // @deprecated – use getManifestStoreValidationState()
   getValidationErrors(): ValidationStatus[]
+
+  // Manifest access
+  getManifestStore(): ManifestStore | null
   getManifestMap(): Record<string, Manifest>
   getActiveManifest(): Manifest | null
+
+  // Content & metadata
+  containsAIGeneratedContent(): boolean
   getCustomMetadata(identifier: string, manifest?: Manifest): any | null
   getItem(item: C2paFormatedItemType): string | boolean
-  toString(): string
+
+  // Serialisation
+  crJson(): Promise<any>    // canonical crJSON (c2pa-web ≥ 0.8.0)
+  toString(): string        // pretty-printed JSON of the manifest store
 }
 ```
 
 | Method | Description |
 |--------|-------------|
 | `containsSignature()` | `true` if a C2PA manifest is present |
-| `isValid()` | `true` if the manifest passes validation without errors |
-| `containsAIGeneratedContent()` | `true` if any manifest asserts AI-generated content |
+| `getManifestStoreValidationState()` | Three-state result: `"Valid"`, `"Trusted"`, or `"Invalid"` |
+| `getActiveManifestValidationState()` | Alias for `getManifestStoreValidationState()` |
+| `isValid()` | `true` for `"Valid"` or `"Trusted"` state — **deprecated**, prefer `getManifestStoreValidationState()` |
 | `getValidationErrors()` | Array of validation errors, empty when valid |
-| `getActiveManifest()` | The currently active manifest or `null` |
+| `getManifestStore()` | The raw underlying `ManifestStore` snapshot |
+| `getActiveManifest()` | The currently active `Manifest` or `null` |
+| `containsAIGeneratedContent()` | `true` if any manifest asserts AI-generated content |
 | `getCustomMetadata(id)` | Custom assertion data by label identifier |
 | `getItem(type)` | Formatted string for `ISSUER`, `DATE`, or `VALIDATION_STATUS` |
+| `crJson()` | Canonical crJSON representation (requires c2pa-web ≥ 0.8.0) |
 | `toString()` | Pretty-printed JSON of the full manifest store |
 
 ---
