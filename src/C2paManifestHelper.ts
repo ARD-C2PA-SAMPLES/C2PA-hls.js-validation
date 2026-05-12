@@ -6,9 +6,8 @@
  */
 
 import {
-    type Manifest, type ManifestStore
+    type Manifest, type ManifestStore, type ValidationStatus, type ValidationState
 } from '@contentauth/c2pa-web'
-import { type ValidationStatus } from '@contentauth/c2pa-web'
 import { containsGenerativeContent } from './utils/containsGenerativeContent'
 
 /**
@@ -45,9 +44,25 @@ export class C2paManifestHelper {
     }
 
     /**
-     * Determines if the manifest is considered valid (i.e., no validation errors).
+     * Returns the three-state validation result of the manifest store:
+     * `"Valid"`, `"Trusted"`, or `"Invalid"`. Returns `null` if no manifest is present.
+     */
+    getManifestStoreValidationState (): ValidationState | null {
+        return this.store?.validation_state ?? null
+    }
+
+    /**
+     * Returns whether the manifest store passes validation.
+     * Considers both `"Valid"` and `"Trusted"` states as valid.
+     * Falls back to checking for absence of validation errors when `validation_state` is unavailable.
+     *
+     * @deprecated Use {@link getManifestStoreValidationState} for the full three-state result.
      */
     isValid (): boolean {
+        const state = this.getManifestStoreValidationState()
+        if (state != null) {
+            return state === 'Valid' || state === 'Trusted'
+        }
         return this.containsSignature() &&
             (this.store?.validation_status?.length ?? 0) === 0
     }

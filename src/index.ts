@@ -11,6 +11,8 @@ import { type C2paBridge, type C2PAConfig, type TrustSettings } from './C2paBrid
 import { C2paManifestHelper } from './C2paManifestHelper'
 import { C2paFormatedItemType, type C2PAValidationStatus } from './C2paManifestHelper'
 
+export { type ValidationState } from '@contentauth/c2pa-web'
+
 export {
     C2paHlsBridge,
     C2paMp4Bridge,
