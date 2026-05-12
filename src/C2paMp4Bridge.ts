@@ -43,7 +43,7 @@ export class C2paMp4Bridge extends AbstractC2PABridge {
             if (!c2paResult) { throw new Error('No c2pa data found') }
 
             const store = await c2paResult.manifestStore()
-            this.#manifestReader = new C2paManifestHelper(store)
+            this.#manifestReader = new C2paManifestHelper(store, c2paResult)
             this.log('c2paResult', c2paResult)
         } catch (err) {
             this.error('Error reading c2pa data from url:', this.#url, err)

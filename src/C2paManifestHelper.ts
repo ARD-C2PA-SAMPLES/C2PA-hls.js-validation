@@ -6,7 +6,7 @@
  */
 
 import {
-    type Manifest, type ManifestStore, type ValidationStatus, type ValidationState
+    type Manifest, type ManifestStore, type ValidationStatus, type ValidationState, type Reader
 } from '@contentauth/c2pa-web'
 import { containsGenerativeContent } from './utils/containsGenerativeContent'
 
@@ -33,7 +33,32 @@ export enum C2paFormatedItemType {
  * Provides helpers for signature presence, validation status, custom metadata, and formatted output.
  */
 export class C2paManifestHelper {
-    constructor (private readonly store: ManifestStore) {
+    constructor (private readonly store: ManifestStore, private readonly reader?: Reader) {
+    }
+
+    /**
+     * Returns the raw underlying {@link ManifestStore}, or `null` if unavailable.
+     */
+    getManifestStore (): ManifestStore | null {
+        return this.store ?? null
+    }
+
+    /**
+     * Returns the validation state of the manifest store as `ValidationState`,
+     * identical to {@link getManifestStoreValidationState}. Provided for API symmetry
+     * with the active-manifest getters.
+     */
+    getActiveManifestValidationState (): ValidationState | null {
+        return this.getManifestStoreValidationState()
+    }
+
+    /**
+     * Returns the manifest store as crJSON (the canonical C2PA JSON representation
+     * introduced in c2pa-web v0.8.0). Requires a {@link Reader} to be passed to the
+     * constructor; returns `null` otherwise.
+     */
+    async crJson (): Promise<any> {
+        return this.reader?.crJson() ?? null
     }
 
     /**

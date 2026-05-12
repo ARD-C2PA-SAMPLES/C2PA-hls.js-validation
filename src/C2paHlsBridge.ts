@@ -202,7 +202,7 @@ export class C2paHlsBridge extends AbstractC2PABridge {
         }
 
         const store = await manifestInfo.manifestStore()
-        const manifestReader = new C2paManifestHelper(store)
+        const manifestReader = new C2paManifestHelper(store, manifestInfo)
 
         const interval = new Interval(fragment.start, fragment.end)
 
