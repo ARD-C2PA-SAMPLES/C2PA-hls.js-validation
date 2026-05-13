@@ -148,7 +148,6 @@ class C2paManifestHelper {
   // Signature & validation
   containsSignature(): boolean
   getManifestStoreValidationState(): ValidationState | null   // "Valid" | "Trusted" | "Invalid"
-  getActiveManifestValidationState(): ValidationState | null  // alias for the above
   isValid(): boolean                                          // @deprecated – use getManifestStoreValidationState()
   getValidationErrors(): ValidationStatus[]
 
@@ -172,7 +171,6 @@ class C2paManifestHelper {
 |--------|-------------|
 | `containsSignature()` | `true` if a C2PA manifest is present |
 | `getManifestStoreValidationState()` | Three-state result: `"Valid"`, `"Trusted"`, or `"Invalid"` |
-| `getActiveManifestValidationState()` | Alias for `getManifestStoreValidationState()` |
 | `isValid()` | `true` for `"Valid"` or `"Trusted"` state — **deprecated**, prefer `getManifestStoreValidationState()` |
 | `getValidationErrors()` | Array of validation errors, empty when valid |
 | `getManifestStore()` | The raw underlying `ManifestStore` snapshot |

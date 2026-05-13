@@ -44,15 +44,6 @@ export class C2paManifestHelper {
     }
 
     /**
-     * Returns the validation state of the manifest store as `ValidationState`,
-     * identical to {@link getManifestStoreValidationState}. Provided for API symmetry
-     * with the active-manifest getters.
-     */
-    getActiveManifestValidationState (): ValidationState | null {
-        return this.getManifestStoreValidationState()
-    }
-
-    /**
      * Returns the manifest store as crJSON (the canonical C2PA JSON representation
      * introduced in c2pa-web v0.8.0). Requires a {@link Reader} to be passed to the
      * constructor; returns `null` otherwise.
