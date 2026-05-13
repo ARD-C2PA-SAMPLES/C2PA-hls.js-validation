@@ -178,6 +178,18 @@
             color: var(--bad);
         }
 
+        .label .v[data-value="Valid"] {
+            color: var(--ok);
+        }
+
+        .label .v[data-value="Trusted"] {
+            color: var(--accent);
+        }
+
+        .label .v[data-value="Invalid"] {
+            color: var(--bad);
+        }
+
         @media (max-width: 900px) {
             .grid {
                 grid-template-columns: 1fr;
@@ -224,13 +236,9 @@
         <div class="card">
             <h3 id="lbl-head-status">Status</h3>
             <div id="labels" class="labels">
-                <div class="label"><span class="k">Contains signature?</span><span class="v" id="lbl-hasSignature"
-                                                                                   data-value="false">false</span></div>
-                <div class="label"><span class="k">Is valid?</span><span class="v" id="lbl-isValid" data-value="false">false</span>
-                </div>
-                <div class="label"><span class="k">Has validation errors?</span><span class="v" id="lbl-hasError"
-                                                                                      data-value="false">false</span>
-                </div>
+                <div class="label"><span class="k">Contains signature?</span><span class="v" id="lbl-hasSignature" data-value="false">false</span></div>
+                <div class="label"><span class="k">Validation state</span><span class="v" id="lbl-validationState" data-value="">—</span></div>
+                <div class="label"><span class="k">Has validation errors?</span><span class="v" id="lbl-hasError" data-value="false">false</span></div>
                 <div class="label"><span class="k">Contains AI?</span><span class="v" id="lbl-isAiGenerated"
                                                                             data-value="false">false</span></div>
                 <div class="label"><span class="k">Issuer</span><span class="v" id="lbl-issuer"
@@ -238,6 +246,10 @@
                 <div class="label"><span class="k">Signature time</span><span class="v" id="lbl-time"
                                                                               data-value="false">false</span></div>
             </div>
+        </div>
+        <div class="card" style="grid-column: 1 / -1">
+            <h3>crJSON</h3>
+            <pre id="json-crjson" class="jsonbox">—</pre>
         </div>
     </div>
 </div>
@@ -353,6 +365,12 @@
     btnPlay.addEventListener('click', () => video.play().catch(err => log('Play error', err?.message)));
     btnPause.addEventListener('click', () => video.pause());
 
+    // —— JSON helper for crJSON card ——
+    function setCrJson(obj) {
+        const el = document.getElementById('json-crjson');
+        el.textContent = obj != null ? JSON.stringify(obj, null, 2) : '—';
+    }
+
     // —— C2PA status update, throttled to 500 ms ——
     let lastC2paUpdate = 0;
     video.addEventListener('timeupdate', () => {
@@ -366,7 +384,7 @@
         if (!c2paReader) return;
 
         setLabel('hasSignature', c2paReader.containsSignature());
-        setLabel('isValid', c2paReader.isValid());
+        setLabel('validationState', c2paReader.getManifestStoreValidationState() ?? '—');
         setLabel('isAiGenerated', c2paReader.containsAIGeneratedContent());
         setLabel('hasError', c2paReader.getValidationErrors().length > 0);
 
@@ -377,6 +395,8 @@
 
         setJSON(1, JSON.parse(c2paReader.toString()));
         setJSON(2, c2paReader.getValidationErrors());
+
+        c2paReader.crJson().then(setCrJson).catch(() => setCrJson(null));
     });
 
     // initial load
