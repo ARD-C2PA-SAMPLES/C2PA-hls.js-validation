@@ -5,7 +5,7 @@
  * This source code is part of the C2PA-HLS integration library.
  */
 
-import { type C2paSdk, createC2pa, type Settings } from '@contentauth/c2pa-web'
+import { type C2paSdk, createC2pa, type Settings, type TrustSettings } from '@contentauth/c2pa-web'
 import { type Interval } from '@flatten-js/interval-tree'
 import { type C2paManifestHelper } from './C2paManifestHelper'
 import { type NamedLogger, withNamedLogger } from './utils/NamedLogger'
@@ -14,7 +14,23 @@ import wasmAssetUrl from '@contentauth/c2pa-web/resources/c2pa.wasm'
 
 export interface C2PAConfig {
     enableTrustListVerification: boolean
+    /**
+     * Override the WASM source URL. Use this when your bundler (e.g. Vite) rewrites
+     * the default URL and causes an integrity mismatch.
+     */
+    wasmSrc?: string
+    /**
+     * Custom C2PA trust settings. When provided together with `enableTrustListVerification: true`,
+     * these are used directly instead of fetching from contentcredentials.org.
+     */
+    trust?: TrustSettings
+    /**
+     * Custom CAWG identity trust settings. Merged into the SDK settings when provided.
+     */
+    cawgTrust?: TrustSettings
 }
+
+export type { TrustSettings }
 
 export interface C2paBridge {
     getC2PAMetaByTimeCode: (timeCode: number) => C2paManifestHelper | null
@@ -35,7 +51,7 @@ export class AbstractC2PABridge implements NamedLogger, C2paBridge {
     constructor (config: C2PAConfig = {
         enableTrustListVerification: false
     }) {
-        withNamedLogger(this, 'AbstractC2PABridge')
+        withNamedLogger(this, this.constructor.name)
         this.config = config
         this.initC2PA()
     }
@@ -103,20 +119,19 @@ export class AbstractC2PABridge implements NamedLogger, C2paBridge {
      *          used for C2PA signature verification.
      */
     private async getToolkitSettings (): Promise<Settings> {
-        const [trustAnchors, allowedList, trustConfig] = await Promise.all(
-            ['anchors.pem', 'allowed.sha256.txt', 'store.cfg'].map(this.loadTrustResource)
-        )
-
+        const trust: TrustSettings = this.config.trust ?? await this.loadRemoteTrustSettings()
         return {
-            trust: {
-                trustConfig,
-                trustAnchors,
-                allowedList
-            },
-            verify: {
-                verifyTrust: true
-            }
+            trust,
+            ...(this.config.cawgTrust ? { cawgTrust: this.config.cawgTrust } : {}),
+            verify: { verifyTrust: true }
         }
+    }
+
+    private async loadRemoteTrustSettings (): Promise<TrustSettings> {
+        const [trustAnchors, allowedList, trustConfig] = await Promise.all(
+            ['anchors.pem', 'allowed.sha256.txt', 'store.cfg'].map(f => this.loadTrustResource(f))
+        )
+        return { trustAnchors, allowedList, trustConfig }
     }
 
     /**
@@ -132,7 +147,7 @@ export class AbstractC2PABridge implements NamedLogger, C2paBridge {
                 if (this.config.enableTrustListVerification) {
                     this.c2paTookitSettings = await this.getToolkitSettings()
                 }
-                this.c2pa = await createC2pa({ wasmSrc: wasmAssetUrl, settings: this.c2paTookitSettings ?? undefined })
+                this.c2pa = await createC2pa({ wasmSrc: this.config.wasmSrc ?? wasmAssetUrl, settings: this.c2paTookitSettings ?? undefined })
 
                 this.log('C2PA runtime initialized', this.c2paTookitSettings)
                 this.onRuntimeReady()

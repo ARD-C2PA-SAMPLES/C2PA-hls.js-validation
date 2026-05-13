@@ -6,9 +6,8 @@
  */
 
 import {
-    type Manifest, type ManifestStore
+    type Manifest, type ManifestStore, type ValidationStatus, type ValidationState, type Reader
 } from '@contentauth/c2pa-web'
-import { type ValidationStatus } from '@contentauth/c2pa-types/types/ManifestStore'
 import { containsGenerativeContent } from './utils/containsGenerativeContent'
 
 /**
@@ -34,7 +33,23 @@ export enum C2paFormatedItemType {
  * Provides helpers for signature presence, validation status, custom metadata, and formatted output.
  */
 export class C2paManifestHelper {
-    constructor (private readonly store: ManifestStore) {
+    constructor (private readonly store: ManifestStore, private readonly reader?: Reader) {
+    }
+
+    /**
+     * Returns the raw underlying {@link ManifestStore}, or `null` if unavailable.
+     */
+    getManifestStore (): ManifestStore | null {
+        return this.store ?? null
+    }
+
+    /**
+     * Returns the manifest store as crJSON (the canonical C2PA JSON representation
+     * introduced in c2pa-web v0.8.0). Requires a {@link Reader} to be passed to the
+     * constructor; returns `null` otherwise.
+     */
+    async crJson (): Promise<any> {
+        return this.reader?.crJson() ?? null
     }
 
     /**
@@ -45,9 +60,25 @@ export class C2paManifestHelper {
     }
 
     /**
-     * Determines if the manifest is considered valid (i.e., no validation errors).
+     * Returns the three-state validation result of the manifest store:
+     * `"Valid"`, `"Trusted"`, or `"Invalid"`. Returns `null` if no manifest is present.
+     */
+    getManifestStoreValidationState (): ValidationState | null {
+        return this.store?.validation_state ?? null
+    }
+
+    /**
+     * Returns whether the manifest store passes validation.
+     * Considers both `"Valid"` and `"Trusted"` states as valid.
+     * Falls back to checking for absence of validation errors when `validation_state` is unavailable.
+     *
+     * @deprecated Use {@link getManifestStoreValidationState} for the full three-state result.
      */
     isValid (): boolean {
+        const state = this.getManifestStoreValidationState()
+        if (state != null) {
+            return state === 'Valid' || state === 'Trusted'
+        }
         return this.containsSignature() &&
             (this.store?.validation_status?.length ?? 0) === 0
     }
@@ -56,7 +87,7 @@ export class C2paManifestHelper {
      * Returns any validation errors associated with the manifest.
      */
     getValidationErrors (): ValidationStatus[] {
-        if (!this.containsSignature) {
+        if (!this.containsSignature()) {
             return [{
                 code: 'not-found',
                 url: '',
@@ -77,7 +108,7 @@ export class C2paManifestHelper {
     getActiveManifest (): Manifest | null {
         const activeManifestId = this.store?.active_manifest ?? null
         if (!activeManifestId) return null
-        return this.store?.manifests[activeManifestId] ?? null
+        return this.store?.manifests?.[activeManifestId] ?? null
     }
 
     /**
@@ -91,7 +122,7 @@ export class C2paManifestHelper {
         let manifestToUse = manifest
         if (!manifestToUse) {
             if (this.store?.active_manifest !== null && this.store?.active_manifest !== undefined) {
-                manifestToUse = this.store?.manifests[this.store?.active_manifest]
+                manifestToUse = this.store?.manifests?.[this.store.active_manifest]
             }
         }
         if (!manifestToUse) return null
@@ -130,7 +161,7 @@ export class C2paManifestHelper {
         const activeManifestId = this.store?.active_manifest ?? null
         if (!activeManifestId) return 'unknown'
 
-        const activeManifest = this.store?.manifests[activeManifestId]
+        const activeManifest = this.store?.manifests?.[activeManifestId]
         if (!activeManifest) return 'unknown'
 
         switch (item) {
@@ -172,12 +203,4 @@ export class C2paManifestHelper {
         }, 4)
     }
 
-    // Optional debugging method (currently unused)
-    // private parseResult(): void {
-    //     if (!this.containsSignature) return
-    //     for (const key in this.result.manifestStore?.manifests) {
-    //         const manifest = this.result.manifestStore?.manifests[key]
-    //         console.log(manifest)
-    //     }
-    // }
 }

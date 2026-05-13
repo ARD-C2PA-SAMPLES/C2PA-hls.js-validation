@@ -26,8 +26,8 @@ export class C2paMp4Bridge extends AbstractC2PABridge {
     }
 
     override getTamperedWithIntervals (): Interval[] {
-        // returns max length to match api
-        return [new Interval(0, Number.MAX_SAFE_INTEGER)]
+        if (!this.#manifestReader) return []
+        return this.#manifestReader.isValid() ? [] : [new Interval(0, Number.MAX_SAFE_INTEGER)]
     }
 
     override dispose (): void {
@@ -43,7 +43,7 @@ export class C2paMp4Bridge extends AbstractC2PABridge {
             if (!c2paResult) { throw new Error('No c2pa data found') }
 
             const store = await c2paResult.manifestStore()
-            this.#manifestReader = new C2paManifestHelper(store)
+            this.#manifestReader = new C2paManifestHelper(store, c2paResult)
             this.log('c2paResult', c2paResult)
         } catch (err) {
             this.error('Error reading c2pa data from url:', this.#url, err)
