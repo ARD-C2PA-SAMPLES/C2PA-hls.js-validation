@@ -31,6 +31,21 @@ export enum C2paFormatedItemType {
 }
 
 /**
+ * A single training / data-mining usage permission, drawn from the CAWG
+ * `cawg.training-mining` assertion (or the legacy `c2pa.training-mining`).
+ *
+ * See {@link https://cawg.io/training-and-data-mining/1.1/}.
+ */
+export interface TrainingMiningEntry {
+    /** The usage category key, e.g. `cawg.ai_generative_training` or the legacy `c2pa.*` form. */
+    key: string
+    /** Whether the use is permitted. Standard values: `allowed`, `notAllowed`, `constrained`. */
+    use: string
+    /** Free-text constraint description; present when `use` is `constrained`. */
+    constraintInfo?: string
+}
+
+/**
  * Wrapper class for accessing and formatting information from a C2PA read result.
  * Provides helpers for signature presence, validation status, custom metadata, and formatted output.
  */
@@ -167,6 +182,41 @@ export class C2paManifestHelper {
         const target = manifest ?? this.getActiveManifest()
         if (!target) return []
         return getManifestActions(target)
+    }
+
+    /**
+     * Returns the training / data-mining usage permissions of a manifest.
+     *
+     * Prefers the current CAWG assertion `cawg.training-mining` (C2PA ≥ 2.2) and
+     * falls back to the legacy `c2pa.training-mining` label. Returns an empty array
+     * when neither assertion is present or the shape is unrecognized. Defaults to
+     * the active manifest.
+     *
+     * @param manifest An optional manifest object. Defaults to the active manifest.
+     */
+    getTrainingMiningUsage (manifest?: Manifest): TrainingMiningEntry[] {
+        const data = (this.getCustomMetadata('cawg.training-mining', manifest)
+            ?? this.getCustomMetadata('c2pa.training-mining', manifest)) as
+            { entries?: Record<string, { use?: unknown, constraint_info?: unknown } | null> } | null
+
+        const entries = data?.entries
+        if (entries === null || entries === undefined || typeof entries !== 'object') {
+            return []
+        }
+
+        const out: TrainingMiningEntry[] = []
+        for (const [key, entry] of Object.entries(entries)) {
+            const use = entry?.use
+            if (typeof use !== 'string') {
+                continue
+            }
+            const result: TrainingMiningEntry = { key, use }
+            if (typeof entry?.constraint_info === 'string') {
+                result.constraintInfo = entry.constraint_info
+            }
+            out.push(result)
+        }
+        return out
     }
 
     /**
