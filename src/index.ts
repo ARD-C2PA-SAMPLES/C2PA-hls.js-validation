@@ -9,9 +9,15 @@ import { C2paHlsBridge } from './C2paHlsBridge'
 import { C2paMp4Bridge } from './C2paMp4Bridge'
 import { type C2paBridge, type C2PAConfig, type TrustSettings } from './C2paBridge'
 import { C2paManifestHelper } from './C2paManifestHelper'
-import { C2paFormatedItemType, type C2PAValidationStatus } from './C2paManifestHelper'
+import {
+    C2paFormatedItemType,
+    type C2PAValidationStatus,
+    type GenerativeContentLevel,
+    type TrainingMiningEntry,
+    type Creator
+} from './C2paManifestHelper'
 
-export { type ValidationState } from '@contentauth/c2pa-web'
+export { type Action, type Manifest, type ValidationState } from '@contentauth/c2pa-web'
 
 export {
     C2paHlsBridge,
@@ -19,6 +25,9 @@ export {
     C2paManifestHelper,
     C2paFormatedItemType,
     type C2PAValidationStatus,
+    type GenerativeContentLevel,
+    type TrainingMiningEntry,
+    type Creator,
     type C2paBridge,
     type C2PAConfig,
     type TrustSettings

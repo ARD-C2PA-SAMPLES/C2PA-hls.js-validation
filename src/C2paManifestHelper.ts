@@ -6,9 +6,11 @@
  */
 
 import {
-    type Manifest, type ManifestStore, type ValidationStatus, type ValidationState, type Reader
+    type Action, type Manifest, type ManifestStore, type ValidationStatus, type ValidationState, type Reader
 } from '@contentauth/c2pa-web'
-import { containsGenerativeContent } from './utils/containsGenerativeContent'
+import { containsGenerativeContent, generativeContentLevel, getManifestActions, type GenerativeContentLevel } from './utils/containsGenerativeContent'
+
+export { type GenerativeContentLevel } from './utils/containsGenerativeContent'
 
 /**
  * Represents the validation status of a C2PA manifest.
@@ -26,6 +28,31 @@ export enum C2paFormatedItemType {
     ISSUER,
     DATE,
     VALIDATION_STATUS
+}
+
+/**
+ * A single training / data-mining usage permission, drawn from the CAWG
+ * `cawg.training-mining` assertion (or the legacy `c2pa.training-mining`).
+ *
+ * See {@link https://cawg.io/training-and-data-mining/1.1/}.
+ */
+export interface TrainingMiningEntry {
+    /** The usage category key, e.g. `cawg.ai_generative_training` or the legacy `c2pa.*` form. */
+    key: string
+    /** Whether the use is permitted. Standard values: `allowed`, `notAllowed`, `constrained`. */
+    use: string
+    /** Free-text constraint description; present when `use` is `constrained`. */
+    constraintInfo?: string
+}
+
+/**
+ * A normalized creator/author entry, sourced from the schema.org CreativeWork
+ * assertion (typed) or CAWG-era metadata assertions (`cawg.metadata` / `stds.iptc`).
+ */
+export interface Creator {
+    name: string
+    /** schema.org `@type` (`Organization` | `Person`) when known, otherwise `undefined`. */
+    type?: string
 }
 
 /**
@@ -150,6 +177,107 @@ export class C2paManifestHelper {
         }
 
         return false
+    }
+
+    /**
+     * Returns the merged action list of a manifest, drawn from its `c2pa.actions`
+     * and `c2pa.actions.v2` assertions (in that order), with v2 action templates
+     * resolved so template-inherited fields (software agent, description,
+     * digitalSourceType) appear directly on each action. Defaults to the active
+     * manifest. Returns an empty array when no action assertions are present.
+     *
+     * @param manifest An optional manifest object. Defaults to the active manifest.
+     */
+    getActions (manifest?: Manifest): Action[] {
+        const target = manifest ?? this.getActiveManifest()
+        if (!target) return []
+        return getManifestActions(target)
+    }
+
+    /**
+     * Returns the training / data-mining usage permissions of a manifest.
+     *
+     * Prefers the current CAWG assertion `cawg.training-mining` (C2PA ≥ 2.2) and
+     * falls back to the legacy `c2pa.training-mining` label. Returns an empty array
+     * when neither assertion is present or the shape is unrecognized. Defaults to
+     * the active manifest.
+     *
+     * @param manifest An optional manifest object. Defaults to the active manifest.
+     */
+    getTrainingMiningUsage (manifest?: Manifest): TrainingMiningEntry[] {
+        const data = (this.getCustomMetadata('cawg.training-mining', manifest)
+            ?? this.getCustomMetadata('c2pa.training-mining', manifest)) as
+            { entries?: Record<string, { use?: unknown, constraint_info?: unknown } | null> } | null
+
+        const entries = data?.entries
+        if (entries === null || entries === undefined || typeof entries !== 'object') {
+            return []
+        }
+
+        const out: TrainingMiningEntry[] = []
+        for (const [key, entry] of Object.entries(entries)) {
+            const use = entry?.use
+            if (typeof use !== 'string') {
+                continue
+            }
+            const result: TrainingMiningEntry = { key, use }
+            if (typeof entry?.constraint_info === 'string') {
+                result.constraintInfo = entry.constraint_info
+            }
+            out.push(result)
+        }
+        return out
+    }
+
+    /**
+     * Returns the normalized creator/author list of a manifest.
+     *
+     * Prefers the typed schema.org CreativeWork authors when present (they carry an
+     * `@type`), and otherwise falls back to the CAWG-era metadata assertions
+     * (`cawg.metadata` / `stds.iptc`), reading `dc:creator` (a string array).
+     * Returns an empty array when no creators are declared. Defaults to the active
+     * manifest.
+     *
+     * @param manifest An optional manifest object. Defaults to the active manifest.
+     */
+    getCreators (manifest?: Manifest): Creator[] {
+        const creativeWork = this.getCustomMetadata('stds.schema-org.CreativeWork', manifest) as
+            { author?: Array<{ '@type'?: unknown, name?: unknown } | null> } | null
+
+        const fromCreativeWork = (creativeWork?.author ?? [])
+            .filter((a): a is { '@type'?: unknown, name: string } => a !== null && a !== undefined && typeof a.name === 'string')
+            .map(a => ({ name: a.name, type: typeof a['@type'] === 'string' ? a['@type'] : undefined }))
+
+        if (fromCreativeWork.length > 0) {
+            return fromCreativeWork
+        }
+
+        for (const label of ['cawg.metadata', 'stds.iptc']) {
+            const metadata = this.getCustomMetadata(label, manifest) as { 'dc:creator'?: unknown } | null
+            const creators = metadata?.['dc:creator']
+            if (Array.isArray(creators)) {
+                const names = creators.filter((c): c is string => typeof c === 'string')
+                if (names.length > 0) {
+                    return names.map(name => ({ name }))
+                }
+            }
+        }
+
+        return []
+    }
+
+    /**
+     * Returns the graded generative-AI classification of a manifest:
+     * `'generated'`, `'partial'`, or `'none'`. Returns `null` when the manifest
+     * carries no action/generative assertions, so callers can hide the section
+     * rather than assert "no AI". Defaults to the active manifest.
+     *
+     * @param manifest An optional manifest object. Defaults to the active manifest.
+     */
+    getGenerativeContentLevel (manifest?: Manifest): GenerativeContentLevel | null {
+        const target = manifest ?? this.getActiveManifest()
+        if (!target) return null
+        return generativeContentLevel(target)
     }
 
     /**
