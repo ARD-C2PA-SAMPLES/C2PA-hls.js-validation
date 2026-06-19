@@ -8,7 +8,9 @@
 import {
     type Manifest, type ManifestStore, type ValidationStatus, type ValidationState, type Reader
 } from '@contentauth/c2pa-web'
-import { containsGenerativeContent } from './utils/containsGenerativeContent'
+import { containsGenerativeContent, generativeContentLevel, type GenerativeContentLevel } from './utils/containsGenerativeContent'
+
+export { type GenerativeContentLevel } from './utils/containsGenerativeContent'
 
 /**
  * Represents the validation status of a C2PA manifest.
@@ -150,6 +152,20 @@ export class C2paManifestHelper {
         }
 
         return false
+    }
+
+    /**
+     * Returns the graded generative-AI classification of a manifest:
+     * `'generated'`, `'partial'`, or `'none'`. Returns `null` when the manifest
+     * carries no action/generative assertions, so callers can hide the section
+     * rather than assert "no AI". Defaults to the active manifest.
+     *
+     * @param manifest An optional manifest object. Defaults to the active manifest.
+     */
+    getGenerativeContentLevel (manifest?: Manifest): GenerativeContentLevel | null {
+        const target = manifest ?? this.getActiveManifest()
+        if (!target) return null
+        return generativeContentLevel(target)
     }
 
     /**

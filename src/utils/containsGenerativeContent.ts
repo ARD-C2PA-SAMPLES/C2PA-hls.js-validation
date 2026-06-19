@@ -4,15 +4,35 @@
 
 import type { Manifest, ManifestAssertion } from '@contentauth/c2pa-web'
 
+/**
+ * Graded generative-AI classification for a single manifest:
+ * - `'generated'`: fully synthetic media (trained-algorithmic source).
+ * - `'partial'`: partly AI-assisted (composite with trained-algorithmic media,
+ *   or a legacy generative-ai marker).
+ * - `'none'`: action/generative assertions are present but none indicate AI.
+ */
+export type GenerativeContentLevel = 'none' | 'partial' | 'generated'
+
 // --- Constants & helpers ---
 
-// Use a Set for O(1) membership checks
-const GEN_AI_DST = new Set<string>([
+// IPTC digitalSourceType values, split by the level they imply.
+// Use Sets for O(1) membership checks.
+const GEN_AI_DST_FULL = new Set<string>([
     'http://cv.iptc.org/newscodes/digitalsourcetype/trainedAlgorithmicMedia',
-    'https://cv.iptc.org/newscodes/digitalsourcetype/trainedAlgorithmicMedia',
+    'https://cv.iptc.org/newscodes/digitalsourcetype/trainedAlgorithmicMedia'
+])
+
+const GEN_AI_DST_PARTIAL = new Set<string>([
     'http://cv.iptc.org/newscodes/digitalsourcetype/compositeWithTrainedAlgorithmicMedia',
     'https://cv.iptc.org/newscodes/digitalsourcetype/compositeWithTrainedAlgorithmicMedia'
 ])
+
+/** Classifies a digitalSourceType string to its generative level, or `null` if non-generative. */
+function dstLevel (dst: string | undefined): 'generated' | 'partial' | null {
+    if (dst && GEN_AI_DST_FULL.has(dst)) return 'generated'
+    if (dst && GEN_AI_DST_PARTIAL.has(dst)) return 'partial'
+    return null
+}
 
 function isRecord (x: unknown): x is Record<string, unknown> {
     return !!x && typeof x === 'object'
@@ -50,13 +70,14 @@ function isActionsV2 (a: ManifestAssertion): a is ManifestAssertion & { data: { 
 }
 
 /**
- * Returns true if an ActionV1 matches generative AI conditions.
+ * Returns the generative level of an ActionV1, or `null` if non-generative.
  */
-function actionV1IsGenerative (action: Record<string, unknown>): boolean {
+function actionV1Level (action: Record<string, unknown>): 'generated' | 'partial' | null {
     const digitalSourceType = typeof action.digitalSourceType === 'string' ? (action.digitalSourceType) : undefined
 
     // direct digitalSourceType
-    if (digitalSourceType && GEN_AI_DST.has(digitalSourceType)) return true
+    const direct = dstLevel(digitalSourceType)
+    if (direct) return direct
 
     // third-party via parameters on c2pa.opened
     const actionName = typeof action.action === 'string' ? (action.action) : undefined
@@ -70,50 +91,68 @@ function actionV1IsGenerative (action: Record<string, unknown>): boolean {
         if (
             paramsDigitalSourceType &&
             provider === 'remoteProvider.3rdParty' &&
-            GEN_AI_DST.has(paramsDigitalSourceType) &&
             !!paramsSoftwareAgent
         ) {
-            return true
+            return dstLevel(paramsDigitalSourceType)
         }
     }
 
-    return false
+    return null
 }
 
 /**
- * Returns true if an ActionV2 matches generative AI conditions.
+ * Returns the generative level of an ActionV2, or `null` if non-generative.
  */
-function actionV2IsGenerative (action: Record<string, unknown>): boolean {
+function actionV2Level (action: Record<string, unknown>): 'generated' | 'partial' | null {
     const digitalSourceType = typeof action.digitalSourceType === 'string' ? (action.digitalSourceType) : undefined
-    return !!(digitalSourceType && GEN_AI_DST.has(digitalSourceType))
+    return dstLevel(digitalSourceType)
 }
 
 // --- Public API ---
 
 /**
- * Checks whether the manifest contains any generative AI content indicators.
+ * Classifies the generative-AI involvement of a manifest.
+ *
+ * Inspects the `com.adobe.generative-ai`, `c2pa.actions` and `c2pa.actions.v2`
+ * assertions. Returns the highest level found, `'none'` when such assertions
+ * exist but none indicate AI, or `null` when no relevant assertions are present
+ * at all (so callers can omit the section instead of asserting "no AI").
  */
-export function containsGenerativeContent (manifest: Manifest): boolean {
+export function generativeContentLevel (manifest: Manifest): GenerativeContentLevel | null {
     const assertions = manifest.assertions ?? []
-    for (const a of assertions) {
-        // Legacy assertion: com.adobe.generative-ai
-        if (isLegacyAssertion(a)) return true
+    let hasRelevant = false
+    let best: GenerativeContentLevel = 'none'
 
-        // Actions v1
-        if (isActionsV1(a)) {
-            const actions = (a.data as { actions: Array<Record<string, unknown>> }).actions
-            for (const act of actions) {
-                if (actionV1IsGenerative(act)) return true
-            }
+    for (const a of assertions) {
+        // Legacy assertion: com.adobe.generative-ai → treated as partial unless a
+        // stronger trained-algorithmic source is found elsewhere.
+        if (isLegacyAssertion(a)) {
+            hasRelevant = true
+            if (best === 'none') best = 'partial'
+            continue
         }
 
-        // Actions v2
-        if (isActionsV2(a)) {
+        const isV1 = isActionsV1(a)
+        const isV2 = isActionsV2(a)
+        if (isV1 || isV2) {
+            hasRelevant = true
             const actions = (a.data as { actions: Array<Record<string, unknown>> }).actions
             for (const act of actions) {
-                if (actionV2IsGenerative(act)) return true
+                const level = isV2 ? actionV2Level(act) : actionV1Level(act)
+                if (level === 'generated') return 'generated' // highest level, no need to look further
+                if (level === 'partial') best = 'partial'
             }
         }
     }
-    return false
+
+    if (!hasRelevant) return null
+    return best
+}
+
+/**
+ * Checks whether the manifest contains any generative AI content indicators.
+ */
+export function containsGenerativeContent (manifest: Manifest): boolean {
+    const level = generativeContentLevel(manifest)
+    return level === 'partial' || level === 'generated'
 }
