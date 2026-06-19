@@ -46,6 +46,16 @@ export interface TrainingMiningEntry {
 }
 
 /**
+ * A normalized creator/author entry, sourced from the schema.org CreativeWork
+ * assertion (typed) or CAWG-era metadata assertions (`cawg.metadata` / `stds.iptc`).
+ */
+export interface Creator {
+    name: string
+    /** schema.org `@type` (`Organization` | `Person`) when known, otherwise `undefined`. */
+    type?: string
+}
+
+/**
  * Wrapper class for accessing and formatting information from a C2PA read result.
  * Provides helpers for signature presence, validation status, custom metadata, and formatted output.
  */
@@ -217,6 +227,43 @@ export class C2paManifestHelper {
             out.push(result)
         }
         return out
+    }
+
+    /**
+     * Returns the normalized creator/author list of a manifest.
+     *
+     * Prefers the typed schema.org CreativeWork authors when present (they carry an
+     * `@type`), and otherwise falls back to the CAWG-era metadata assertions
+     * (`cawg.metadata` / `stds.iptc`), reading `dc:creator` (a string array).
+     * Returns an empty array when no creators are declared. Defaults to the active
+     * manifest.
+     *
+     * @param manifest An optional manifest object. Defaults to the active manifest.
+     */
+    getCreators (manifest?: Manifest): Creator[] {
+        const creativeWork = this.getCustomMetadata('stds.schema-org.CreativeWork', manifest) as
+            { author?: Array<{ '@type'?: unknown, name?: unknown } | null> } | null
+
+        const fromCreativeWork = (creativeWork?.author ?? [])
+            .filter((a): a is { '@type'?: unknown, name: string } => a !== null && a !== undefined && typeof a.name === 'string')
+            .map(a => ({ name: a.name, type: typeof a['@type'] === 'string' ? a['@type'] : undefined }))
+
+        if (fromCreativeWork.length > 0) {
+            return fromCreativeWork
+        }
+
+        for (const label of ['cawg.metadata', 'stds.iptc']) {
+            const metadata = this.getCustomMetadata(label, manifest) as { 'dc:creator'?: unknown } | null
+            const creators = metadata?.['dc:creator']
+            if (Array.isArray(creators)) {
+                const names = creators.filter((c): c is string => typeof c === 'string')
+                if (names.length > 0) {
+                    return names.map(name => ({ name }))
+                }
+            }
+        }
+
+        return []
     }
 
     /**

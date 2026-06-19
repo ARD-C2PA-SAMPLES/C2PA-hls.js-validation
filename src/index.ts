@@ -13,7 +13,8 @@ import {
     C2paFormatedItemType,
     type C2PAValidationStatus,
     type GenerativeContentLevel,
-    type TrainingMiningEntry
+    type TrainingMiningEntry,
+    type Creator
 } from './C2paManifestHelper'
 
 export { type Action, type Manifest, type ValidationState } from '@contentauth/c2pa-web'
@@ -26,6 +27,7 @@ export {
     type C2PAValidationStatus,
     type GenerativeContentLevel,
     type TrainingMiningEntry,
+    type Creator,
     type C2paBridge,
     type C2PAConfig,
     type TrustSettings
