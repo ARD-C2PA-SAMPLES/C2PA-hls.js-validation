@@ -2,7 +2,14 @@
  * Helper functions to test if the manifest contains any generative AI indicators
  */
 
-import type { Manifest, ManifestAssertion } from '@contentauth/c2pa-web'
+import type { Action, Manifest, ManifestAssertion } from '@contentauth/c2pa-web'
+
+/**
+ * Fields a `c2pa.actions.v2` action template may supply as defaults for every
+ * action sharing its `action` label. See the C2PA "Action Templates" section:
+ * https://spec.c2pa.org/specifications/specifications/2.1/specs/C2PA_Specification.html#_templates
+ */
+type ActionRecord = Record<string, unknown>
 
 /**
  * Graded generative-AI classification for a single manifest:
@@ -62,11 +69,65 @@ function isActionsV1 (a: ManifestAssertion): a is ManifestAssertion & { data: { 
     return Array.isArray(actions)
 }
 
-function isActionsV2 (a: ManifestAssertion): a is ManifestAssertion & { data: { actions: Array<Record<string, unknown>> } } {
+function isActionsV2 (a: ManifestAssertion): a is ManifestAssertion & { data: { actions: ActionRecord[] } } {
     if (a.label !== 'c2pa.actions.v2') return false
     if (!isRecord(a.data)) return false
     const actions = (a.data).actions
     return Array.isArray(actions)
+}
+
+// Fields an action may inherit from its template when omitted on the action itself.
+const TEMPLATE_INHERITED_FIELDS = ['softwareAgent', 'softwareAgentIndex', 'description', 'digitalSourceType', 'icon'] as const
+
+/**
+ * Applies `c2pa.actions.v2` action-template defaults to each action. A template
+ * provides default values (software agent, description, digitalSourceType, …)
+ * for every action that shares its `action` label; values set directly on an
+ * action take precedence. A no-op when no templates are present (e.g. when the
+ * reader already resolved them, or for v1 actions).
+ */
+function applyActionTemplates (actions: ActionRecord[], templates: unknown): ActionRecord[] {
+    if (!Array.isArray(templates) || templates.length === 0) {
+        return actions
+    }
+
+    const byLabel = new Map<string, ActionRecord>()
+    for (const template of templates) {
+        if (isRecord(template) && typeof template.action === 'string' && !byLabel.has(template.action)) {
+            byLabel.set(template.action, template)
+        }
+    }
+
+    return actions.map(action => {
+        const label = typeof action.action === 'string' ? action.action : undefined
+        const template = label !== undefined ? byLabel.get(label) : undefined
+        if (!template) {
+            return action
+        }
+
+        const merged: ActionRecord = { ...action }
+        for (const field of TEMPLATE_INHERITED_FIELDS) {
+            if ((merged[field] ?? null) === null && (template[field] ?? null) !== null) {
+                merged[field] = template[field]
+            }
+        }
+        return merged
+    })
+}
+
+/**
+ * Returns the action records of an actions assertion, with v2 templates resolved.
+ * Returns `null` if the assertion is not an actions assertion.
+ */
+function resolveAssertionActions (a: ManifestAssertion): { actions: ActionRecord[], isV2: boolean } | null {
+    if (isActionsV2(a)) {
+        const data = a.data as { actions: ActionRecord[], templates?: unknown }
+        return { actions: applyActionTemplates(data.actions, data.templates), isV2: true }
+    }
+    if (isActionsV1(a)) {
+        return { actions: (a.data as { actions: ActionRecord[] }).actions, isV2: false }
+    }
+    return null
 }
 
 /**
@@ -132,13 +193,11 @@ export function generativeContentLevel (manifest: Manifest): GenerativeContentLe
             continue
         }
 
-        const isV1 = isActionsV1(a)
-        const isV2 = isActionsV2(a)
-        if (isV1 || isV2) {
+        const resolved = resolveAssertionActions(a)
+        if (resolved) {
             hasRelevant = true
-            const actions = (a.data as { actions: Array<Record<string, unknown>> }).actions
-            for (const act of actions) {
-                const level = isV2 ? actionV2Level(act) : actionV1Level(act)
+            for (const act of resolved.actions) {
+                const level = resolved.isV2 ? actionV2Level(act) : actionV1Level(act)
                 if (level === 'generated') return 'generated' // highest level, no need to look further
                 if (level === 'partial') best = 'partial'
             }
@@ -147,6 +206,24 @@ export function generativeContentLevel (manifest: Manifest): GenerativeContentLe
 
     if (!hasRelevant) return null
     return best
+}
+
+/**
+ * Returns the merged action list of a manifest, drawn from its `c2pa.actions`
+ * and `c2pa.actions.v2` assertions (in that order), with v2 action templates
+ * resolved so inherited fields (software agent, description, digitalSourceType)
+ * appear directly on each action. Returns an empty array when no action
+ * assertions are present.
+ */
+export function getManifestActions (manifest: Manifest): Action[] {
+    const out: ActionRecord[] = []
+    for (const a of manifest.assertions ?? []) {
+        const resolved = resolveAssertionActions(a)
+        if (resolved) {
+            out.push(...resolved.actions)
+        }
+    }
+    return out as unknown as Action[]
 }
 
 /**

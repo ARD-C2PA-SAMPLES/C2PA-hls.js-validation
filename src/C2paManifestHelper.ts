@@ -6,9 +6,9 @@
  */
 
 import {
-    type Manifest, type ManifestStore, type ValidationStatus, type ValidationState, type Reader
+    type Action, type Manifest, type ManifestStore, type ValidationStatus, type ValidationState, type Reader
 } from '@contentauth/c2pa-web'
-import { containsGenerativeContent, generativeContentLevel, type GenerativeContentLevel } from './utils/containsGenerativeContent'
+import { containsGenerativeContent, generativeContentLevel, getManifestActions, type GenerativeContentLevel } from './utils/containsGenerativeContent'
 
 export { type GenerativeContentLevel } from './utils/containsGenerativeContent'
 
@@ -152,6 +152,21 @@ export class C2paManifestHelper {
         }
 
         return false
+    }
+
+    /**
+     * Returns the merged action list of a manifest, drawn from its `c2pa.actions`
+     * and `c2pa.actions.v2` assertions (in that order), with v2 action templates
+     * resolved so template-inherited fields (software agent, description,
+     * digitalSourceType) appear directly on each action. Defaults to the active
+     * manifest. Returns an empty array when no action assertions are present.
+     *
+     * @param manifest An optional manifest object. Defaults to the active manifest.
+     */
+    getActions (manifest?: Manifest): Action[] {
+        const target = manifest ?? this.getActiveManifest()
+        if (!target) return []
+        return getManifestActions(target)
     }
 
     /**
