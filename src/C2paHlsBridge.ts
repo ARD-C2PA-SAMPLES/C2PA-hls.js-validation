@@ -38,6 +38,12 @@ export class C2paHlsBridge extends AbstractC2PABridge {
     readonly #hlsInstance: Hls
     #fragValidationMap: Record<string, FragValidationType> = {}
 
+    // Single stable reference for the FRAG_LOADING listener. `.bind()` produces a
+    // new function each call, so binding inline at registration time made the
+    // handler impossible to remove in dispose() (off() never matched) — leaking a
+    // listener per stream reload. Bind once and reuse for both on() and off().
+    readonly #onFragLoading = this.onFragLoading.bind(this)
+
     /**
      * Creates a new C2PAHlsBridge instance.
      * @param hls - The HLS.js player instance to attach fragment hooks to.
@@ -67,7 +73,7 @@ export class C2paHlsBridge extends AbstractC2PABridge {
 
     override dispose (): void {
         super.dispose()
-        this.#hlsInstance.off(Events.FRAG_LOADING, this.onFragLoading)
+        this.#hlsInstance.off(Events.FRAG_LOADING, this.#onFragLoading)
     }
 
     /**
@@ -90,7 +96,7 @@ export class C2paHlsBridge extends AbstractC2PABridge {
      * @internal
      */
     private registerHLSEvents (): void {
-        this.#hlsInstance.on(Events.FRAG_LOADING, this.onFragLoading.bind(this))
+        this.#hlsInstance.on(Events.FRAG_LOADING, this.#onFragLoading)
     }
 
     /**
