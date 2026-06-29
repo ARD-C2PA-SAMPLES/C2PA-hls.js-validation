@@ -76,6 +76,70 @@ export interface VerifiedIdentity {
 }
 
 /**
+ * A reference to a binary resource (e.g. a thumbnail) in the manifest store,
+ * resolvable to bytes via {@link C2paManifestHelper.getResourceDataUrl}.
+ */
+export interface ResourceThumbnail {
+    /** JUMBF URI of the resource within the store. */
+    identifier: string
+    /** MIME type of the resource, e.g. `image/jpeg`. */
+    format: string
+}
+
+/**
+ * An ingredient placed into a manifest via a `c2pa.placed` action, resolved to
+ * display info. See {@link C2paManifestHelper.getPlacedIngredients}.
+ */
+export interface PlacedIngredient {
+    /** Ingredient title, falling back to the source manifest's title; `null` if unknown. */
+    title: string | null
+    /** Ingredient MIME type, falling back to the source manifest's format; `null` if unknown. */
+    format: string | null
+    /** The ingredient relationship (`parentOf` | `componentOf` | `inputTo`) when reported. */
+    relationship?: string
+    /** A representative thumbnail for the placed ingredient, when one is resolvable. */
+    thumbnail?: ResourceThumbnail | null
+}
+
+/** Narrowed alias for a manifest ingredient (avoids a direct c2pa-types import). */
+type C2paIngredient = NonNullable<Manifest['ingredients']>[number]
+
+/** Normalizes a resource reference to a {@link ResourceThumbnail}, or `null`. */
+function toThumbnail (ref: { identifier?: unknown, format?: unknown } | null | undefined): ResourceThumbnail | null {
+    if (ref && typeof ref.identifier === 'string' && typeof ref.format === 'string') {
+        return { identifier: ref.identifier, format: ref.format }
+    }
+    return null
+}
+
+/**
+ * The 0-based ingredient index referenced by a `c2pa.placed` action, parsed from
+ * the `__N` suffix of its ingredient-assertion URI (no suffix → index 0), or
+ * `null` when no ingredient reference is present.
+ */
+function placedIngredientIndex (action: Action): number | null {
+    const params = action.parameters
+    const ref = params?.ingredients?.[0] ?? params?.ingredient ?? null
+    const url = typeof ref?.url === 'string' ? ref.url : null
+    if (url === null) {
+        return null
+    }
+    const match = url.match(/c2pa\.ingredient(?:\.v\d+)?(?:__(\d+))?$/)
+    if (!match) {
+        return null
+    }
+    return match[1] !== undefined ? Number.parseInt(match[1], 10) : 0
+}
+
+/** Best-available thumbnail for a placed ingredient: ingredient → source manifest → source's ingredients. */
+function pickIngredientThumbnail (ingredient: C2paIngredient, source: Manifest | undefined): ResourceThumbnail | null {
+    return toThumbnail(ingredient.thumbnail) ??
+        toThumbnail(source?.thumbnail) ??
+        (source?.ingredients ?? []).map(sub => toThumbnail(sub.thumbnail)).find(t => t !== null) ??
+        null
+}
+
+/**
  * Wrapper class for accessing and formatting information from a C2PA read result.
  * Provides helpers for signature presence, validation status, custom metadata, and formatted output.
  */
@@ -394,6 +458,77 @@ export class C2paManifestHelper {
             }
         }
         return best
+    }
+
+    /**
+     * Returns the ingredients placed into a manifest through its `c2pa.placed`
+     * actions, resolved to display info.
+     *
+     * Each `c2pa.placed` action references an ingredient assertion
+     * (`c2pa.ingredient.v2|v3`, optionally `__N`-suffixed for duplicates); the
+     * suffix is the 0-based index into the manifest's `ingredients` list. Title and
+     * format fall back to the ingredient's source manifest when the ingredient
+     * carries none, and a representative thumbnail is resolved from the ingredient,
+     * else its source manifest, else the first thumbnail among the source
+     * manifest's own ingredients. Defaults to the active manifest.
+     *
+     * @param manifest An optional manifest object. Defaults to the active manifest.
+     */
+    getPlacedIngredients (manifest?: Manifest): PlacedIngredient[] {
+        const target = manifest ?? this.getActiveManifest()
+        if (!target) return []
+        const ingredients = target.ingredients ?? []
+
+        const out: PlacedIngredient[] = []
+        for (const action of this.getActions(target)) {
+            if (action.action !== 'c2pa.placed') {
+                continue
+            }
+            const index = placedIngredientIndex(action)
+            const ingredient = index !== null ? ingredients[index] : undefined
+            if (!ingredient) {
+                continue
+            }
+            const source = typeof ingredient.active_manifest === 'string'
+                ? this.store?.manifests?.[ingredient.active_manifest]
+                : undefined
+            out.push({
+                title: (ingredient.title ?? source?.title) ?? null,
+                format: (ingredient.format ?? source?.format) ?? null,
+                relationship: ingredient.relationship ?? undefined,
+                thumbnail: pickIngredientThumbnail(ingredient, source)
+            })
+        }
+        return out
+    }
+
+    /**
+     * Resolves a manifest resource (e.g. an ingredient thumbnail) to a `data:` URL,
+     * using the {@link Reader} passed to the constructor. Returns `null` when no
+     * reader is available or the resource cannot be read.
+     *
+     * @param resource The resource reference to resolve (identifier + MIME type).
+     */
+    async getResourceDataUrl (resource: ResourceThumbnail): Promise<string | null> {
+        if (!this.reader) {
+            return null
+        }
+        try {
+            const bytes = await this.reader.resourceToBytes(resource.identifier)
+            if (!bytes || bytes.length === 0) {
+                return null
+            }
+            // base64-encode in chunks to avoid blowing the argument limit of
+            // String.fromCharCode on large buffers.
+            let binary = ''
+            const chunkSize = 0x8000
+            for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+                binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize))
+            }
+            return `data:${resource.format};base64,${btoa(binary)}`
+        } catch {
+            return null
+        }
     }
 
     /**
