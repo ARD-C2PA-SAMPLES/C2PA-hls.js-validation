@@ -113,11 +113,12 @@ function toThumbnail (ref: { identifier?: unknown, format?: unknown } | null | u
 }
 
 /**
- * The 0-based ingredient index referenced by a `c2pa.placed` action, parsed from
- * the `__N` suffix of its ingredient-assertion URI (no suffix → index 0), or
- * `null` when no ingredient reference is present.
+ * The 0-based ingredient index an action acts on, parsed from the `__N` suffix of
+ * its ingredient-assertion URI (no suffix → index 0), or `null` when the action
+ * carries no ingredient reference. Applies to any ingredient-referencing action
+ * (e.g. `c2pa.opened`, `c2pa.placed`).
  */
-function placedIngredientIndex (action: Action): number | null {
+function actionIngredientIndex (action: Action): number | null {
     const params = action.parameters
     const ref = params?.ingredients?.[0] ?? params?.ingredient ?? null
     const url = typeof ref?.url === 'string' ? ref.url : null
@@ -477,29 +478,50 @@ export class C2paManifestHelper {
     getPlacedIngredients (manifest?: Manifest): PlacedIngredient[] {
         const target = manifest ?? this.getActiveManifest()
         if (!target) return []
-        const ingredients = target.ingredients ?? []
 
         const out: PlacedIngredient[] = []
         for (const action of this.getActions(target)) {
             if (action.action !== 'c2pa.placed') {
                 continue
             }
-            const index = placedIngredientIndex(action)
-            const ingredient = index !== null ? ingredients[index] : undefined
-            if (!ingredient) {
-                continue
+            const placed = this.getActionIngredient(action, target)
+            if (placed) {
+                out.push(placed)
             }
-            const source = typeof ingredient.active_manifest === 'string'
-                ? this.store?.manifests?.[ingredient.active_manifest]
-                : undefined
-            out.push({
-                title: (ingredient.title ?? source?.title) ?? null,
-                format: (ingredient.format ?? source?.format) ?? null,
-                relationship: ingredient.relationship ?? undefined,
-                thumbnail: pickIngredientThumbnail(ingredient, source)
-            })
         }
         return out
+    }
+
+    /**
+     * Resolves the ingredient a single action acts on (e.g. `c2pa.opened`,
+     * `c2pa.placed`) to display info, or `null` when the action references no
+     * ingredient. The action's ingredient-assertion URI is mapped to the manifest's
+     * `ingredients` list by its `__N` index; title/format/thumbnail fall back to the
+     * ingredient's source manifest as in {@link getPlacedIngredients}. Defaults to
+     * the active manifest.
+     *
+     * @param action The action to resolve (as returned by {@link getActions}).
+     * @param manifest An optional manifest object. Defaults to the active manifest.
+     */
+    getActionIngredient (action: Action, manifest?: Manifest): PlacedIngredient | null {
+        const target = manifest ?? this.getActiveManifest()
+        if (!target) return null
+        const ingredients = target.ingredients ?? []
+
+        const index = actionIngredientIndex(action)
+        const ingredient = index !== null ? ingredients[index] : undefined
+        if (!ingredient) {
+            return null
+        }
+        const source = typeof ingredient.active_manifest === 'string'
+            ? this.store?.manifests?.[ingredient.active_manifest]
+            : undefined
+        return {
+            title: (ingredient.title ?? source?.title) ?? null,
+            format: (ingredient.format ?? source?.format) ?? null,
+            relationship: ingredient.relationship ?? undefined,
+            thumbnail: pickIngredientThumbnail(ingredient, source)
+        }
     }
 
     /**
