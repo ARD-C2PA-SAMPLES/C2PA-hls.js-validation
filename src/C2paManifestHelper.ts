@@ -99,6 +99,12 @@ export interface PlacedIngredient {
     relationship?: string
     /** A representative thumbnail for the placed ingredient, when one is resolvable. */
     thumbnail?: ResourceThumbnail | null
+    /**
+     * Store key (label) of the ingredient's own manifest, when that manifest is
+     * present in the store — i.e. the ingredient resolves to another manifest in
+     * the same provenance graph. `null` otherwise. Lets callers link to it.
+     */
+    manifestLabel?: string | null
 }
 
 /** Narrowed alias for a manifest ingredient (avoids a direct c2pa-types import). */
@@ -513,14 +519,15 @@ export class C2paManifestHelper {
         if (!ingredient) {
             return null
         }
-        const source = typeof ingredient.active_manifest === 'string'
-            ? this.store?.manifests?.[ingredient.active_manifest]
-            : undefined
+        const sourceLabel = typeof ingredient.active_manifest === 'string' ? ingredient.active_manifest : null
+        const source = sourceLabel !== null ? this.store?.manifests?.[sourceLabel] : undefined
         return {
             title: (ingredient.title ?? source?.title) ?? null,
             format: (ingredient.format ?? source?.format) ?? null,
             relationship: ingredient.relationship ?? undefined,
-            thumbnail: pickIngredientThumbnail(ingredient, source)
+            thumbnail: pickIngredientThumbnail(ingredient, source),
+            // only expose the label when the manifest actually exists in the store
+            manifestLabel: source ? sourceLabel : null
         }
     }
 
