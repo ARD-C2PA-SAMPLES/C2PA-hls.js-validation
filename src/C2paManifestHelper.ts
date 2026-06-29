@@ -56,6 +56,26 @@ export interface Creator {
 }
 
 /**
+ * A verified identity declared by the CAWG identity assertion (`cawg.identity`).
+ *
+ * See {@link https://cawg.io/identity/}.
+ */
+export interface VerifiedIdentity {
+    /** Display name of the verified identity (person, account holder, or signer). */
+    name: string
+    /**
+     * The kind of identity, e.g. `cawg.social_media` / `cawg.document_verification`
+     * for an ICA verifiable credential, or `cawg.x509.cose` when the identity is
+     * derived from the signing certificate issuer.
+     */
+    type?: string
+    /** Identity-provider name, e.g. `linkedin`, when reported (ICA form only). */
+    provider?: string
+    /** Public URI for the identity (e.g. a social profile), when reported. */
+    uri?: string
+}
+
+/**
  * Wrapper class for accessing and formatting information from a C2PA read result.
  * Provides helpers for signature presence, validation status, custom metadata, and formatted output.
  */
@@ -263,7 +283,74 @@ export class C2paManifestHelper {
             }
         }
 
+        // Last resort: named identities verified via the CAWG identity assertion
+        // (e.g. a person bound to the signer through a social-media credential).
+        // The x509.cose form only repeats the certificate issuer (already shown as
+        // the signer), so it is excluded here. Names are left untyped — CAWG
+        // identity types are not schema.org `@type` values.
+        const verified = this.getVerifiedIdentities(manifest).filter(v => v.type !== 'cawg.x509.cose')
+        if (verified.length > 0) {
+            return verified.map(v => ({ name: v.name }))
+        }
+
         return []
+    }
+
+    /**
+     * Returns the verified identities declared by a manifest's CAWG identity
+     * assertion (`cawg.identity`). Two assertion shapes are recognized:
+     *
+     * - the Identity Claims Aggregation (ICA) verifiable credential, which lists
+     *   `verifiedIdentities` (named persons/accounts verified via a provider), and
+     * - the `cawg.x509.cose` form, whose `signature_info.issuer` names the signer
+     *   (emitted with `type: 'cawg.x509.cose'`).
+     *
+     * Returns an empty array when no identity assertion is present. Defaults to
+     * the active manifest.
+     *
+     * @param manifest An optional manifest object. Defaults to the active manifest.
+     */
+    getVerifiedIdentities (manifest?: Manifest): VerifiedIdentity[] {
+        const data = this.getCustomMetadata('cawg.identity', manifest) as {
+            verifiedIdentities?: Array<{ type?: unknown, name?: unknown, username?: unknown, uri?: unknown, provider?: { name?: unknown } | null } | null>
+            signature_info?: { issuer?: unknown } | null
+        } | null
+        if (data === null || typeof data !== 'object') {
+            return []
+        }
+
+        const out: VerifiedIdentity[] = []
+
+        // ICA verifiable-credential form: one entry per verified identity.
+        for (const vi of data.verifiedIdentities ?? []) {
+            if (vi === null || vi === undefined) {
+                continue
+            }
+            const name = typeof vi.name === 'string'
+                ? vi.name
+                : (typeof vi.username === 'string' ? vi.username : null)
+            if (name === null) {
+                continue
+            }
+            const entry: VerifiedIdentity = { name }
+            if (typeof vi.type === 'string') {
+                entry.type = vi.type
+            }
+            if (typeof vi.uri === 'string') {
+                entry.uri = vi.uri
+            }
+            if (vi.provider !== null && vi.provider !== undefined && typeof vi.provider.name === 'string') {
+                entry.provider = vi.provider.name
+            }
+            out.push(entry)
+        }
+
+        // x509.cose form: the signing certificate's issuer names the signer.
+        if (out.length === 0 && typeof data.signature_info?.issuer === 'string') {
+            out.push({ name: data.signature_info.issuer, type: 'cawg.x509.cose' })
+        }
+
+        return out
     }
 
     /**
@@ -278,6 +365,35 @@ export class C2paManifestHelper {
         const target = manifest ?? this.getActiveManifest()
         if (!target) return null
         return generativeContentLevel(target)
+    }
+
+    /**
+     * Returns the highest generative-AI level across *all* manifests in the store,
+     * not just the active one.
+     *
+     * The active manifest is frequently a packaging/publishing step (e.g. a
+     * repackaged-for-delivery signature) that carries no generative assertions,
+     * while the actual AI evidence lives in ingredient manifests. This walks the
+     * whole provenance chain and returns the strongest signal: `'generated'` if any
+     * manifest is fully synthetic, otherwise `'partial'` if any is partly
+     * AI-assisted, otherwise `'none'` if relevant action/generative assertions
+     * exist but none indicate AI, and `null` when no manifest carries any such
+     * assertions at all (so callers can omit the section rather than assert "no AI").
+     */
+    getCumulativeGenerativeContentLevel (): GenerativeContentLevel | null {
+        let best: GenerativeContentLevel | null = null
+        for (const manifest of Object.values(this.store?.manifests ?? {})) {
+            const level = generativeContentLevel(manifest)
+            if (level === 'generated') {
+                return 'generated' // strongest level, no need to look further
+            }
+            if (level === 'partial') {
+                best = 'partial'
+            } else if (level === 'none' && best === null) {
+                best = 'none'
+            }
+        }
+        return best
     }
 
     /**
