@@ -8,9 +8,9 @@
  *   the lightweight default, no WASM/worker. Per-asset, if it throws on an input
  *   it doesn't support, that asset falls back to the WASM engine (logged).
  * - **WASM** (@contentauth/c2pa-web) when `crypto.subtle` is unavailable
- *   (insecure/legacy context), or — until the WebCrypto engine implements
- *   trust-list verification — when `enableTrustListVerification` is set, so the
- *   three-state `Trusted` result is preserved.
+ *   (insecure/legacy context). The WebCrypto engine implements trust-list
+ *   verification (chain-to-anchor + allow-listed end-entity), so trust-on reads
+ *   no longer need WASM.
  */
 
 import { createC2pa as createWasmC2pa, type Settings } from '@contentauth/c2pa-web'
@@ -61,11 +61,8 @@ function withWasmFallback (primary: C2paEngine, makeWasm: () => Promise<C2paEngi
 export async function createEngine (config: C2PAConfig, settings: Settings | undefined, log: Log): Promise<C2paEngine> {
     const makeWasm = async (): Promise<C2paEngine> => await createWasmC2pa(wasmConfig(config, settings)) as C2paEngine
 
-    // Trust-list verification is not yet implemented in the WebCrypto engine, so
-    // route trust-enabled reads through WASM to preserve the `Trusted` state.
-    // (Drop this branch once the WebCrypto engine gains trust verification.)
-    if (!hasWebCrypto() || config.enableTrustListVerification) {
-        log(`[engine] using WASM engine (webcrypto=${hasWebCrypto()}, trust=${config.enableTrustListVerification === true})`)
+    if (!hasWebCrypto()) {
+        log('[engine] using WASM engine (crypto.subtle unavailable)')
         return makeWasm()
     }
 
