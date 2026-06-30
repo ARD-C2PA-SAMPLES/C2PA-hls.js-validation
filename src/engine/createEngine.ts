@@ -4,13 +4,12 @@
  *
  * Selects the C2PA engine at runtime:
  *
- * - **WebCrypto** (@nettrek/c2pa-web-crypto) when `crypto.subtle` is available —
- *   the lightweight default, no WASM/worker. Per-asset, if it throws on an input
- *   it doesn't support, that asset falls back to the WASM engine (logged).
- * - **WASM** (@contentauth/c2pa-web) when `crypto.subtle` is unavailable
- *   (insecure/legacy context). The WebCrypto engine implements trust-list
- *   verification (chain-to-anchor + allow-listed end-entity), so trust-on reads
- *   no longer need WASM.
+ * - **WASM** (@contentauth/c2pa-web) — the default. Used whenever the experimental
+ *   WebCrypto engine is not enabled, or when `crypto.subtle` is unavailable.
+ * - **WebCrypto** (@nettrek/c2pa-web-crypto) — experimental, opt-in via
+ *   `config.enableExperimentalWebCrypto`. Used where `crypto.subtle` is available;
+ *   lightweight, no WASM/worker. Per-asset, if it throws on an input it doesn't
+ *   support, that asset falls back to the WASM engine (logged).
  */
 
 import { createC2pa as createWasmC2pa, type Settings } from '@contentauth/c2pa-web'
@@ -61,12 +60,18 @@ function withWasmFallback (primary: C2paEngine, makeWasm: () => Promise<C2paEngi
 export async function createEngine (config: C2PAConfig, settings: Settings | undefined, log: Log): Promise<C2paEngine> {
     const makeWasm = async (): Promise<C2paEngine> => await createWasmC2pa(wasmConfig(config, settings)) as C2paEngine
 
+    // The WebCrypto engine is experimental and strictly opt-in; default to WASM.
+    if (!config.enableExperimentalWebCrypto) {
+        log('[engine] using WASM engine (experimental WebCrypto disabled)')
+        return makeWasm()
+    }
+
     if (!hasWebCrypto()) {
         log('[engine] using WASM engine (crypto.subtle unavailable)')
         return makeWasm()
     }
 
-    log('[engine] using WebCrypto engine')
+    log('[engine] using experimental WebCrypto engine')
     // The two libs declare structurally-identical but nominally-distinct Settings.
     const webCrypto = await createWebCryptoC2pa({ settings: settings as never }) as unknown as C2paEngine
     return withWasmFallback(webCrypto, makeWasm, log)

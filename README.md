@@ -71,6 +71,21 @@ const bridge = new C2paMp4Bridge(
 const reader = bridge.getC2PAMetaByTimeCode(0)
 ```
 
+### Engine selection (experimental WebCrypto)
+
+The bridge runs on the WASM engine (`@contentauth/c2pa-web`) by default. The
+experimental WebCrypto engine (`@nettrek/c2pa-web-crypto`, no WASM/worker) is
+strictly opt-in:
+
+```typescript
+const bridge = new C2paHlsBridge({
+  enableTrustListVerification: true,
+  enableExperimentalWebCrypto: true, // use WebCrypto where crypto.subtle exists; WASM fallback
+}, hls)
+```
+
+When disabled (default) the bridge always uses WASM, regardless of `crypto.subtle`.
+
 ### Custom trust settings (offline / local PKI)
 
 ```typescript

@@ -15,6 +15,14 @@ import { type C2paEngine } from './engine/C2paEngine'
 export interface C2PAConfig {
     enableTrustListVerification: boolean
     /**
+     * Use the experimental WebCrypto engine (@nettrek/c2pa-web-crypto) instead of
+     * the WASM engine (@contentauth/c2pa-web). Default `false` → always WASM. When
+     * `true`, the WebCrypto engine is used where `crypto.subtle` is available (with
+     * per-asset WASM fallback); otherwise WASM. The WebCrypto engine is still
+     * experimental, so it is strictly opt-in.
+     */
+    enableExperimentalWebCrypto?: boolean
+    /**
      * Override the WASM source URL. Use this when your bundler (e.g. Vite) rewrites
      * the default URL and causes an integrity mismatch.
      */
