@@ -21,7 +21,8 @@ export interface C2PAConfig {
     wasmSrc?: string
     /**
      * Custom C2PA trust settings. When provided together with `enableTrustListVerification: true`,
-     * these are used directly instead of fetching from contentcredentials.org.
+     * these are used directly instead of fetching the default list from the Content
+     * Credentials trust store (`verify.contentauthenticity.org/trust/*`).
      */
     trust?: TrustSettings
     /**
