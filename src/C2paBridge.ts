@@ -5,12 +5,12 @@
  * This source code is part of the C2PA-HLS integration library.
  */
 
-import { type C2paSdk, createC2pa, type Settings, type TrustSettings } from '@contentauth/c2pa-web'
+import { type Settings, type TrustSettings } from '@contentauth/c2pa-web'
 import { type Interval } from '@flatten-js/interval-tree'
 import { type C2paManifestHelper } from './C2paManifestHelper'
 import { type NamedLogger, withNamedLogger } from './utils/NamedLogger'
-
-import wasmAssetUrl from '@contentauth/c2pa-web/resources/c2pa.wasm'
+import { createEngine } from './engine/createEngine'
+import { type C2paEngine } from './engine/C2paEngine'
 
 export interface C2PAConfig {
     enableTrustListVerification: boolean
@@ -57,7 +57,7 @@ export class AbstractC2PABridge implements NamedLogger, C2paBridge {
     error!: (...args: any[]) => void
 
     protected readonly config: C2PAConfig
-    protected c2pa: C2paSdk | null = null
+    protected c2pa: C2paEngine | null = null
     protected c2paTookitSettings: Settings | null = null
 
     constructor (config: C2PAConfig = {
@@ -168,7 +168,7 @@ export class AbstractC2PABridge implements NamedLogger, C2paBridge {
                 if (this.config.enableTrustListVerification) {
                     this.c2paTookitSettings = await this.getToolkitSettings()
                 }
-                this.c2pa = await createC2pa({ wasmSrc: this.config.wasmSrc ?? wasmAssetUrl, settings: this.c2paTookitSettings ?? undefined })
+                this.c2pa = await createEngine(this.config, this.c2paTookitSettings ?? undefined, (...args) => { this.warn(...args) })
 
                 this.log('C2PA runtime initialized', this.c2paTookitSettings)
                 this.onRuntimeReady()
