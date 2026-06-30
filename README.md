@@ -81,7 +81,9 @@ const bridge = new C2paHlsBridge({
 }, hls)
 ```
 
-When `trust` is omitted the bridge fetches the default lists from `contentcredentials.org`.
+When `trust` is omitted the bridge fetches the default lists from `verify.contentauthenticity.org`
+(the canonical C2PA verifier host — it serves the trust list with CORS headers, whereas
+`contentcredentials.org/trust/*` only 301-redirects here without CORS).
 
 ### Vite / bundler WASM override
 

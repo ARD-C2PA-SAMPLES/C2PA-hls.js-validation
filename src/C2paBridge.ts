@@ -97,11 +97,16 @@ export class AbstractC2PABridge implements NamedLogger, C2paBridge {
     /**
      * Fetches a trust-related resource file from the Content Credentials trust store.
      *
+     * Uses the canonical verifier host directly: `contentcredentials.org/trust/*`
+     * 301-redirects here and serves no CORS headers (so a browser fetch is blocked
+     * by the redirect), whereas `verify.contentauthenticity.org` responds 200 with
+     * `Access-Control-Allow-Origin: *`.
+     *
      * @param file - The name of the file to load (e.g., 'anchors.pem', 'allowed.sha256.txt').
      * @returns A promise resolving to the content of the requested file as a string.
      */
     private async loadTrustResource (file: string): Promise<string> {
-        const res = await fetch(`https://contentcredentials.org/trust/${file}`)
+        const res = await fetch(`https://verify.contentauthenticity.org/trust/${file}`)
 
         return await res.text()
     }
