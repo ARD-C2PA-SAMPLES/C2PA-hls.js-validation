@@ -85,6 +85,25 @@ When `trust` is omitted the bridge fetches the default lists from `verify.conten
 (the canonical C2PA verifier host — it serves the trust list with CORS headers, whereas
 `contentcredentials.org/trust/*` only 301-redirects here without CORS).
 
+### CAWG identity trust
+
+The `cawg.identity` assertion's signer is evaluated against a **separate** trust
+policy (matching c2pa-rs, whose default for it is empty). So a stream whose
+identity assertion is signed by an otherwise-trusted C2PA signer is still
+reported `signingCredential.untrusted` and never reaches `Trusted`. Supply
+`cawgTrust` to control that policy, or set `enableCawgIdentityTrustVerification: true`
+to reuse the resolved C2PA trust list for the identity as well:
+
+```typescript
+const bridge = new C2paHlsBridge({
+  enableTrustListVerification: true,
+  enableCawgIdentityTrustVerification: true, // identity signer judged against the C2PA list too
+}, hls)
+```
+
+This is opt-in: leaving it off keeps the stricter standard default (identity
+untrusted unless an explicit `cawgTrust` is configured).
+
 ### Vite / bundler WASM override
 
 Vite's dependency optimiser can rewrite the WASM URL and break the integrity check.

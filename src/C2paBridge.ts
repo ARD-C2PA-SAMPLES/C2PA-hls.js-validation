@@ -29,6 +29,17 @@ export interface C2PAConfig {
      * Custom CAWG identity trust settings. Merged into the SDK settings when provided.
      */
     cawgTrust?: TrustSettings
+    /**
+     * Evaluate the `cawg.identity` assertion's signer against the C2PA trust list
+     * as well. By default (and per c2pa-rs) the CAWG identity is checked against a
+     * separate, empty trust policy, so an identity signed by an otherwise-trusted
+     * C2PA signer is still reported `signingCredential.untrusted` and the asset
+     * cannot reach `Trusted`. When `true` and no explicit `cawgTrust` is given, the
+     * resolved C2PA trust resources are reused for the CAWG identity, so an
+     * allow-listed signer that also signs the identity assertion validates as
+     * `Trusted`. Opt-in: leaving it `false` keeps the standard, stricter default.
+     */
+    enableCawgIdentityTrustVerification?: boolean
 }
 
 export type { TrustSettings }
@@ -126,9 +137,13 @@ export class AbstractC2PABridge implements NamedLogger, C2paBridge {
      */
     private async getToolkitSettings (): Promise<Settings> {
         const trust: TrustSettings = this.config.trust ?? await this.loadRemoteTrustSettings()
+        // Explicit cawgTrust wins; otherwise reuse the C2PA trust list for the
+        // CAWG identity only when opted in (see `enableCawgIdentityTrustVerification`).
+        const cawgTrust = this.config.cawgTrust ??
+            (this.config.enableCawgIdentityTrustVerification ? trust : undefined)
         return {
             trust,
-            ...(this.config.cawgTrust ? { cawgTrust: this.config.cawgTrust } : {}),
+            ...(cawgTrust ? { cawgTrust } : {}),
             verify: { verifyTrust: true }
         }
     }
