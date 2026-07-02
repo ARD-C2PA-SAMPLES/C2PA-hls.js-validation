@@ -17,6 +17,10 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./chunked": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/chunked.js"
+    },
     "./helpers": {
       "types": "./dist/helpers.d.js",
       "import": "./dist/helpers.js"
