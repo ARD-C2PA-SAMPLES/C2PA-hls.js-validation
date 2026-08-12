@@ -56,6 +56,97 @@ export interface Creator {
 }
 
 /**
+ * A verified identity declared by the CAWG identity assertion (`cawg.identity`).
+ *
+ * See {@link https://cawg.io/identity/}.
+ */
+export interface VerifiedIdentity {
+    /** Display name of the verified identity (person, account holder, or signer). */
+    name: string
+    /**
+     * The kind of identity, e.g. `cawg.social_media` / `cawg.document_verification`
+     * for an ICA verifiable credential, or `cawg.x509.cose` when the identity is
+     * derived from the signing certificate issuer.
+     */
+    type?: string
+    /** Identity-provider name, e.g. `linkedin`, when reported (ICA form only). */
+    provider?: string
+    /** Public URI for the identity (e.g. a social profile), when reported. */
+    uri?: string
+}
+
+/**
+ * A reference to a binary resource (e.g. a thumbnail) in the manifest store,
+ * resolvable to bytes via {@link C2paManifestHelper.getResourceDataUrl}.
+ */
+export interface ResourceThumbnail {
+    /** JUMBF URI of the resource within the store. */
+    identifier: string
+    /** MIME type of the resource, e.g. `image/jpeg`. */
+    format: string
+}
+
+/**
+ * An ingredient placed into a manifest via a `c2pa.placed` action, resolved to
+ * display info. See {@link C2paManifestHelper.getPlacedIngredients}.
+ */
+export interface PlacedIngredient {
+    /** Ingredient title, falling back to the source manifest's title; `null` if unknown. */
+    title: string | null
+    /** Ingredient MIME type, falling back to the source manifest's format; `null` if unknown. */
+    format: string | null
+    /** The ingredient relationship (`parentOf` | `componentOf` | `inputTo`) when reported. */
+    relationship?: string
+    /** A representative thumbnail for the placed ingredient, when one is resolvable. */
+    thumbnail?: ResourceThumbnail | null
+    /**
+     * Store key (label) of the ingredient's own manifest, when that manifest is
+     * present in the store — i.e. the ingredient resolves to another manifest in
+     * the same provenance graph. `null` otherwise. Lets callers link to it.
+     */
+    manifestLabel?: string | null
+}
+
+/** Narrowed alias for a manifest ingredient (avoids a direct c2pa-types import). */
+type C2paIngredient = NonNullable<Manifest['ingredients']>[number]
+
+/** Normalizes a resource reference to a {@link ResourceThumbnail}, or `null`. */
+function toThumbnail (ref: { identifier?: unknown, format?: unknown } | null | undefined): ResourceThumbnail | null {
+    if (ref && typeof ref.identifier === 'string' && typeof ref.format === 'string') {
+        return { identifier: ref.identifier, format: ref.format }
+    }
+    return null
+}
+
+/**
+ * The 0-based ingredient index an action acts on, parsed from the `__N` suffix of
+ * its ingredient-assertion URI (no suffix → index 0), or `null` when the action
+ * carries no ingredient reference. Applies to any ingredient-referencing action
+ * (e.g. `c2pa.opened`, `c2pa.placed`).
+ */
+function actionIngredientIndex (action: Action): number | null {
+    const params = action.parameters
+    const ref = params?.ingredients?.[0] ?? params?.ingredient ?? null
+    const url = typeof ref?.url === 'string' ? ref.url : null
+    if (url === null) {
+        return null
+    }
+    const match = url.match(/c2pa\.ingredient(?:\.v\d+)?(?:__(\d+))?$/)
+    if (!match) {
+        return null
+    }
+    return match[1] !== undefined ? Number.parseInt(match[1], 10) : 0
+}
+
+/** Best-available thumbnail for a placed ingredient: ingredient → source manifest → source's ingredients. */
+function pickIngredientThumbnail (ingredient: C2paIngredient, source: Manifest | undefined): ResourceThumbnail | null {
+    return toThumbnail(ingredient.thumbnail) ??
+        toThumbnail(source?.thumbnail) ??
+        (source?.ingredients ?? []).map(sub => toThumbnail(sub.thumbnail)).find(t => t !== null) ??
+        null
+}
+
+/**
  * Wrapper class for accessing and formatting information from a C2PA read result.
  * Provides helpers for signature presence, validation status, custom metadata, and formatted output.
  */
@@ -263,7 +354,74 @@ export class C2paManifestHelper {
             }
         }
 
+        // Last resort: named identities verified via the CAWG identity assertion
+        // (e.g. a person bound to the signer through a social-media credential).
+        // The x509.cose form only repeats the certificate issuer (already shown as
+        // the signer), so it is excluded here. Names are left untyped — CAWG
+        // identity types are not schema.org `@type` values.
+        const verified = this.getVerifiedIdentities(manifest).filter(v => v.type !== 'cawg.x509.cose')
+        if (verified.length > 0) {
+            return verified.map(v => ({ name: v.name }))
+        }
+
         return []
+    }
+
+    /**
+     * Returns the verified identities declared by a manifest's CAWG identity
+     * assertion (`cawg.identity`). Two assertion shapes are recognized:
+     *
+     * - the Identity Claims Aggregation (ICA) verifiable credential, which lists
+     *   `verifiedIdentities` (named persons/accounts verified via a provider), and
+     * - the `cawg.x509.cose` form, whose `signature_info.issuer` names the signer
+     *   (emitted with `type: 'cawg.x509.cose'`).
+     *
+     * Returns an empty array when no identity assertion is present. Defaults to
+     * the active manifest.
+     *
+     * @param manifest An optional manifest object. Defaults to the active manifest.
+     */
+    getVerifiedIdentities (manifest?: Manifest): VerifiedIdentity[] {
+        const data = this.getCustomMetadata('cawg.identity', manifest) as {
+            verifiedIdentities?: Array<{ type?: unknown, name?: unknown, username?: unknown, uri?: unknown, provider?: { name?: unknown } | null } | null>
+            signature_info?: { issuer?: unknown } | null
+        } | null
+        if (data === null || typeof data !== 'object') {
+            return []
+        }
+
+        const out: VerifiedIdentity[] = []
+
+        // ICA verifiable-credential form: one entry per verified identity.
+        for (const vi of data.verifiedIdentities ?? []) {
+            if (vi === null || vi === undefined) {
+                continue
+            }
+            const name = typeof vi.name === 'string'
+                ? vi.name
+                : (typeof vi.username === 'string' ? vi.username : null)
+            if (name === null) {
+                continue
+            }
+            const entry: VerifiedIdentity = { name }
+            if (typeof vi.type === 'string') {
+                entry.type = vi.type
+            }
+            if (typeof vi.uri === 'string') {
+                entry.uri = vi.uri
+            }
+            if (vi.provider !== null && vi.provider !== undefined && typeof vi.provider.name === 'string') {
+                entry.provider = vi.provider.name
+            }
+            out.push(entry)
+        }
+
+        // x509.cose form: the signing certificate's issuer names the signer.
+        if (out.length === 0 && typeof data.signature_info?.issuer === 'string') {
+            out.push({ name: data.signature_info.issuer, type: 'cawg.x509.cose' })
+        }
+
+        return out
     }
 
     /**
@@ -278,6 +436,128 @@ export class C2paManifestHelper {
         const target = manifest ?? this.getActiveManifest()
         if (!target) return null
         return generativeContentLevel(target)
+    }
+
+    /**
+     * Returns the highest generative-AI level across *all* manifests in the store,
+     * not just the active one.
+     *
+     * The active manifest is frequently a packaging/publishing step (e.g. a
+     * repackaged-for-delivery signature) that carries no generative assertions,
+     * while the actual AI evidence lives in ingredient manifests. This walks the
+     * whole provenance chain and returns the strongest signal: `'generated'` if any
+     * manifest is fully synthetic, otherwise `'partial'` if any is partly
+     * AI-assisted, otherwise `'none'` if relevant action/generative assertions
+     * exist but none indicate AI, and `null` when no manifest carries any such
+     * assertions at all (so callers can omit the section rather than assert "no AI").
+     */
+    getCumulativeGenerativeContentLevel (): GenerativeContentLevel | null {
+        let best: GenerativeContentLevel | null = null
+        for (const manifest of Object.values(this.store?.manifests ?? {})) {
+            const level = generativeContentLevel(manifest)
+            if (level === 'generated') {
+                return 'generated' // strongest level, no need to look further
+            }
+            if (level === 'partial') {
+                best = 'partial'
+            } else if (level === 'none' && best === null) {
+                best = 'none'
+            }
+        }
+        return best
+    }
+
+    /**
+     * Returns the ingredients placed into a manifest through its `c2pa.placed`
+     * actions, resolved to display info.
+     *
+     * Each `c2pa.placed` action references an ingredient assertion
+     * (`c2pa.ingredient.v2|v3`, optionally `__N`-suffixed for duplicates); the
+     * suffix is the 0-based index into the manifest's `ingredients` list. Title and
+     * format fall back to the ingredient's source manifest when the ingredient
+     * carries none, and a representative thumbnail is resolved from the ingredient,
+     * else its source manifest, else the first thumbnail among the source
+     * manifest's own ingredients. Defaults to the active manifest.
+     *
+     * @param manifest An optional manifest object. Defaults to the active manifest.
+     */
+    getPlacedIngredients (manifest?: Manifest): PlacedIngredient[] {
+        const target = manifest ?? this.getActiveManifest()
+        if (!target) return []
+
+        const out: PlacedIngredient[] = []
+        for (const action of this.getActions(target)) {
+            if (action.action !== 'c2pa.placed') {
+                continue
+            }
+            const placed = this.getActionIngredient(action, target)
+            if (placed) {
+                out.push(placed)
+            }
+        }
+        return out
+    }
+
+    /**
+     * Resolves the ingredient a single action acts on (e.g. `c2pa.opened`,
+     * `c2pa.placed`) to display info, or `null` when the action references no
+     * ingredient. The action's ingredient-assertion URI is mapped to the manifest's
+     * `ingredients` list by its `__N` index; title/format/thumbnail fall back to the
+     * ingredient's source manifest as in {@link getPlacedIngredients}. Defaults to
+     * the active manifest.
+     *
+     * @param action The action to resolve (as returned by {@link getActions}).
+     * @param manifest An optional manifest object. Defaults to the active manifest.
+     */
+    getActionIngredient (action: Action, manifest?: Manifest): PlacedIngredient | null {
+        const target = manifest ?? this.getActiveManifest()
+        if (!target) return null
+        const ingredients = target.ingredients ?? []
+
+        const index = actionIngredientIndex(action)
+        const ingredient = index !== null ? ingredients[index] : undefined
+        if (!ingredient) {
+            return null
+        }
+        const sourceLabel = typeof ingredient.active_manifest === 'string' ? ingredient.active_manifest : null
+        const source = sourceLabel !== null ? this.store?.manifests?.[sourceLabel] : undefined
+        return {
+            title: (ingredient.title ?? source?.title) ?? null,
+            format: (ingredient.format ?? source?.format) ?? null,
+            relationship: ingredient.relationship ?? undefined,
+            thumbnail: pickIngredientThumbnail(ingredient, source),
+            // only expose the label when the manifest actually exists in the store
+            manifestLabel: source ? sourceLabel : null
+        }
+    }
+
+    /**
+     * Resolves a manifest resource (e.g. an ingredient thumbnail) to a `data:` URL,
+     * using the {@link Reader} passed to the constructor. Returns `null` when no
+     * reader is available or the resource cannot be read.
+     *
+     * @param resource The resource reference to resolve (identifier + MIME type).
+     */
+    async getResourceDataUrl (resource: ResourceThumbnail): Promise<string | null> {
+        if (!this.reader) {
+            return null
+        }
+        try {
+            const bytes = await this.reader.resourceToBytes(resource.identifier)
+            if (!bytes || bytes.length === 0) {
+                return null
+            }
+            // base64-encode in chunks to avoid blowing the argument limit of
+            // String.fromCharCode on large buffers.
+            let binary = ''
+            const chunkSize = 0x8000
+            for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+                binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize))
+            }
+            return `data:${resource.format};base64,${btoa(binary)}`
+        } catch {
+            return null
+        }
     }
 
     /**

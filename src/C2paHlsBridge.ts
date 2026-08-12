@@ -38,6 +38,12 @@ export class C2paHlsBridge extends AbstractC2PABridge {
     readonly #hlsInstance: Hls
     #fragValidationMap: Record<string, FragValidationType> = {}
 
+    // Single stable reference for the FRAG_LOADING listener. `.bind()` produces a
+    // new function each call, so binding inline at registration time made the
+    // handler impossible to remove in dispose() (off() never matched) — leaking a
+    // listener per stream reload. Bind once and reuse for both on() and off().
+    readonly #onFragLoading = this.onFragLoading.bind(this)
+
     /**
      * Creates a new C2PAHlsBridge instance.
      * @param hls - The HLS.js player instance to attach fragment hooks to.
@@ -67,7 +73,22 @@ export class C2paHlsBridge extends AbstractC2PABridge {
 
     override dispose (): void {
         super.dispose()
-        this.#hlsInstance.off(Events.FRAG_LOADING, this.onFragLoading)
+        this.#hlsInstance.off(Events.FRAG_LOADING, this.#onFragLoading)
+    }
+
+    /**
+     * The C2PA runtime initializes asynchronously (WASM load). For short or
+     * already-buffered streams, every fragment can finish loading *before* the
+     * runtime is ready — in which case the FRAG_LOADING-driven queue bailed on
+     * `!this.c2pa` and nothing would ever re-trigger it. Now that the runtime is
+     * available, drain any level that still has pending fragments.
+     */
+    protected override onRuntimeReady (): void {
+        for (const [levelKey, entry] of Object.entries(this.#fragValidationMap)) {
+            if (!entry.validatorQueueRunning && entry.queuedForCheckFragments.length > 0) {
+                void this.runValidationQueue(levelKey)
+            }
+        }
     }
 
     /**
@@ -75,7 +96,7 @@ export class C2paHlsBridge extends AbstractC2PABridge {
      * @internal
      */
     private registerHLSEvents (): void {
-        this.#hlsInstance.on(Events.FRAG_LOADING, this.onFragLoading.bind(this))
+        this.#hlsInstance.on(Events.FRAG_LOADING, this.#onFragLoading)
     }
 
     /**
@@ -186,53 +207,58 @@ export class C2paHlsBridge extends AbstractC2PABridge {
         }
 
         entry.validatorQueueRunning = true
-        const fragment = entry.queuedForCheckFragments.shift()
-        if (!fragment) {
-            this.error(`[${levelKey}] Fragment unexpectedly null.`)
-            return
-        }
+        // Drain the queue in a try/finally so a fragment that yields no manifest
+        // or throws can never wedge the queue (leaving validatorQueueRunning stuck
+        // true would stop all further validation for this level). New fragments
+        // appended while draining are picked up by the loop.
+        try {
+            let fragment = entry.queuedForCheckFragments.shift()
+            while (fragment) {
+                try {
+                    this.log(`[${levelKey}] Validating segment ${fragment.sn}`)
 
-        this.log(`[${levelKey}] Validating segment ${fragment.sn}`)
+                    const fragmentBlob = new Blob([fragment.data], { type: 'video/mp4' })
+                    const manifestInfo = await this.c2pa.reader.fromBlobFragment(entry.initSegmentData.type, entry.initSegmentData, fragmentBlob)
+                    if (!manifestInfo) {
+                        this.warn(`[${levelKey}] No manifest data found for segment ${fragment.sn}.`)
+                        continue
+                    }
 
-        const fragmentBlob = new Blob([fragment.data], { type: 'video/mp4' })
-        const manifestInfo = await this.c2pa.reader.fromBlobFragment(entry.initSegmentData.type, entry.initSegmentData, fragmentBlob)
-        if (!manifestInfo) {
-            this.warn(`[${levelKey}] No manifest data found for segment ${fragment.sn}.`)
-            return
-        }
+                    const store = await manifestInfo.manifestStore()
+                    const manifestReader = new C2paManifestHelper(store, manifestInfo)
 
-        const store = await manifestInfo.manifestStore()
-        const manifestReader = new C2paManifestHelper(store, manifestInfo)
+                    const interval = new Interval(fragment.start, fragment.end)
 
-        const interval = new Interval(fragment.start, fragment.end)
+                    // Prevent duplicates
+                    entry.timeCodeMappingTree.search(interval).forEach(seg => {
+                        if (seg.interval.low === interval.low && seg.interval.high === interval.high) {
+                            this.warn(`[${levelKey}] Duplicate interval found – replacing`)
+                            entry.timeCodeMappingTree.remove(interval, seg)
+                        }
+                    })
 
-        // Prevent duplicates
-        entry.timeCodeMappingTree.search(interval).forEach(seg => {
-            if (seg.interval.low === interval.low && seg.interval.high === interval.high) {
-                this.warn(`[${levelKey}] Duplicate interval found – replacing`)
-                entry.timeCodeMappingTree.remove(interval, seg)
+                    this.log(`[${levelKey}] Mapping interval ${interval.low}-${interval.high}`, manifestReader)
+                    entry.timeCodeMappingTree.insert(interval, { manifestReader, interval })
+
+                    if (!manifestReader.containsSignature()) {
+                        this.warn(`Segment ${levelKey}.${fragment.sn} has no signature.`)
+                    } else if (!manifestReader.isValid()) {
+                        this.warn(`Segment ${levelKey}.${fragment.sn} failed validation.`, manifestReader.getValidationErrors())
+                    }
+
+                    this.log(`[${levelKey}] Validation complete for segment ${fragment.sn}`)
+                } catch (err) {
+                    this.error(`[${levelKey}] Validation failed for segment ${fragment.sn}.`, err)
+                } finally {
+                    // Clear data reference (manual memory hint) regardless of outcome
+                    // @ts-expect-error: manual memory hit
+                    delete fragment.data
+                }
+
+                fragment = entry.queuedForCheckFragments.shift()
             }
-        })
-
-        this.log(`[${levelKey}] Mapping interval ${interval.low}-${interval.high}`, manifestReader)
-        entry.timeCodeMappingTree.insert(interval, { manifestReader, interval })
-
-        if (!manifestReader.containsSignature) {
-            this.warn(`Segment ${levelKey}.${fragment.sn} has no signature.`)
-        } else if (!manifestReader.isValid()) {
-            this.warn(`Segment ${levelKey}.${fragment.sn} failed validation.`, manifestReader.getValidationErrors())
-        }
-
-        this.log(`[${levelKey}] Validation complete for segment ${fragment.sn}`)
-
-        // Clear data reference
-        // @ts-expect-error: manual memory hit
-        delete fragment.data
-
-        entry.validatorQueueRunning = false
-
-        if (entry.queuedForCheckFragments.length > 0) {
-            await this.runValidationQueue(levelKey)
+        } finally {
+            entry.validatorQueueRunning = false
         }
     }
 }
