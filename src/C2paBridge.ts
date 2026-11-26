@@ -28,6 +28,12 @@ export interface C2PAConfig {
      */
     wasmSrc?: string
     /**
+     * HTTPS URL of the hosted `@contentauth/c2pa-web/c2pa_worker` script. Required under a
+     * Content Security Policy that forbids `blob:` workers; by default the worker runs from
+     * an inline blob URL.
+     */
+    workerSrc?: URL
+    /**
      * Custom C2PA trust settings. When provided together with `enableTrustListVerification: true`,
      * these are used directly instead of fetching the default list from the Content
      * Credentials trust store (`verify.contentauthenticity.org/trust/*`).
@@ -41,7 +47,7 @@ export interface C2PAConfig {
      * Evaluate the `cawg.identity` assertion's signer against the C2PA trust list
      * as well. By default (and per c2pa-rs) the CAWG identity is checked against a
      * separate, empty trust policy, so an identity signed by an otherwise-trusted
-     * C2PA signer is still reported `signingCredential.untrusted` and the asset
+     * C2PA signer is still reported `cawg.x509.credential.untrusted` and the asset
      * cannot reach `Trusted`. When `true` and no explicit `cawgTrust` is given, the
      * resolved C2PA trust resources are reused for the CAWG identity, so an
      * allow-listed signer that also signs the identity assertion validates as

@@ -19,17 +19,30 @@ import { type C2PAConfig } from '../C2paBridge'
 
 type Log = (...args: any[]) => void
 
-// Parameter shape of the WASM engine's factory, referenced type-only (the runtime
-// factory is loaded lazily below), so no static import of the engine remains.
-type WasmC2paConfig = Parameters<typeof import('@contentauth/c2pa-web').createC2pa>[0]
-
 const hasWebCrypto = (): boolean =>
     typeof globalThis !== 'undefined' &&
     typeof globalThis.crypto !== 'undefined' &&
     typeof globalThis.crypto.subtle !== 'undefined'
 
-function wasmConfig (config: C2PAConfig, settings: Settings | undefined): WasmC2paConfig {
-    return { wasmSrc: config.wasmSrc ?? wasmAssetUrl, settings }
+/**
+ * Adapts the c2pa-web ≥ 0.17 class API (`Reader.fromBlob(c2pa, …, context)`) to the
+ * engine surface. One worker and one `Context` per bridge: the worker caches the
+ * WASM context per `Context`, so the settings are transferred and parsed once.
+ */
+async function createWasmEngine (config: C2PAConfig, settings: Settings | undefined): Promise<C2paEngine> {
+    const { createC2pa, Reader, Context } = await import(/* webpackChunkName: "c2pa-engine-wasm" */ '@contentauth/c2pa-web')
+    const c2pa = await createC2pa({
+        wasmSrc: config.wasmSrc ?? wasmAssetUrl,
+        ...(config.workerSrc ? { workerSrc: config.workerSrc } : {})
+    })
+    const context = new Context(settings)
+    return {
+        reader: {
+            fromBlob: async (format, blob) => await Reader.fromBlob(c2pa, format, blob, context),
+            fromBlobFragment: async (format, init, fragment) => await Reader.fromBlobFragment(c2pa, format, init, fragment, context)
+        },
+        dispose: () => { c2pa.dispose() }
+    }
 }
 
 /**
@@ -52,8 +65,8 @@ function withWasmFallback (primary: C2paEngine, makeWasm: () => Promise<C2paEngi
 
     return {
         reader: {
-            fromBlob: async (format, blob, settings) => guard('fromBlob', e => e.reader.fromBlob(format, blob, settings)),
-            fromBlobFragment: async (format, init, fragment, settings) => guard('fromBlobFragment', e => e.reader.fromBlobFragment(format, init, fragment, settings))
+            fromBlob: async (format, blob) => guard('fromBlob', e => e.reader.fromBlob(format, blob)),
+            fromBlobFragment: async (format, init, fragment) => guard('fromBlobFragment', e => e.reader.fromBlobFragment(format, init, fragment))
         },
         dispose: () => { primary.dispose(); void wasm?.then(e => e.dispose()) }
     }
@@ -66,10 +79,7 @@ export async function createEngine (config: C2PAConfig, settings: Settings | und
     // so a downstream webpack emits c2pa-engine-wasm / c2pa-engine-webcrypto chunks.
     // Under the self-contained build (no externals) esbuild
     // inlines them, so the same source stays usable without a bundler.
-    const makeWasm = async (): Promise<C2paEngine> => {
-        const { createC2pa } = await import(/* webpackChunkName: "c2pa-engine-wasm" */ '@contentauth/c2pa-web')
-        return await createC2pa(wasmConfig(config, settings)) as C2paEngine
-    }
+    const makeWasm = async (): Promise<C2paEngine> => await createWasmEngine(config, settings)
 
     // The WebCrypto engine is experimental and strictly opt-in; default to WASM.
     if (!config.enableExperimentalWebCrypto) {
