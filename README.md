@@ -30,6 +30,7 @@ npm install @nettrek/c2pa-hls-bridge
 | `@nettrek/c2pa-hls-bridge` | both bundled in | no bundler, or bundle size is not a concern |
 | `@nettrek/c2pa-hls-bridge/chunked` | both left external | you want your bundler to code-split them |
 | `@nettrek/c2pa-hls-bridge/helpers` | — | standalone helpers (`checkMp4ForC2paHeader`) |
+| `@nettrek/c2pa-hls-bridge/trust/official`, `/trust/interim` | — | bundled trust lists; loaded lazily by `./chunked` |
 
 Both bridge entries expose the identical API and types; they differ only in how
 the engines are packaged. The default entry inlines them, so it works from a
@@ -110,26 +111,59 @@ const bridge = new C2paHlsBridge({
 
 When disabled (default) the bridge always uses WASM, regardless of `crypto.subtle`.
 
+### Trust lists
+
+With `enableTrustListVerification: true` the bridge validates against **bundled** trust
+lists; it never downloads trust data at runtime. Each list is its own chunk
+(`./trust/official`, `./trust/interim`) and is only loaded when trust verification is on.
+
+| List | Content | Default |
+|---|---|---|
+| `official` | C2PA Trust List + C2PA TSA Trust List from [c2pa-org/conformance-public](https://github.com/c2pa-org/conformance-public/tree/main/trust-list), required by C2PA 2.4 §14.4 | on |
+| `interim` | the frozen CAI interim list from `verify.contentauthenticity.org/trust/` (signer + TSA anchors, allow-list) | on |
+
+The interim list stays on by default because current publisher signers and their time-stamp
+authorities are only on it; switch it off once they are on the official list:
+
+```typescript
+const bridge = new C2paHlsBridge({
+  enableTrustListVerification: true,
+  trustLists: { interim: false }, // official C2PA lists only
+}, hls)
+```
+
+The lists are refreshed per release with `npm run gen:trust-lists`; `npm run check:trust-lists`
+(also run before publishing) warns when C2PA has announced a newer official list.
+
+Time stamps count only from a trusted time-stamp authority. Without trust verification no
+TSA is trusted, as in c2pa-rs, so a signer whose certificate has expired since signing is
+reported `signingCredential.expired`.
+
 ### Custom trust settings (offline / local PKI)
 
 ```typescript
 const bridge = new C2paHlsBridge({
   enableTrustListVerification: true,
   trust: { trustAnchors, allowedList, trustConfig },
+  tsaTrust: { trustAnchors: tsaAnchors },
   cawgTrust: { trustAnchors },
 }, hls)
 ```
 
-When `trust` is omitted the bridge fetches the default lists from `verify.contentauthenticity.org`
-(the canonical C2PA verifier host — it serves the trust list with CORS headers, whereas
-`contentcredentials.org/trust/*` only 301-redirects here without CORS).
+`trust` and `tsaTrust` replace the bundled signer and TSA lists respectively.
+
+### CSP without `blob:` workers
+
+The WASM engine runs in a worker created from an inline blob URL by default. Under a
+Content Security Policy that forbids `blob:` workers, host
+`@contentauth/c2pa-web/c2pa_worker` yourself and pass its URL as `workerSrc`.
 
 ### CAWG identity trust
 
 The `cawg.identity` assertion's signer is evaluated against a **separate** trust
 policy (matching c2pa-rs, whose default for it is empty). So a stream whose
 identity assertion is signed by an otherwise-trusted C2PA signer is still
-reported `signingCredential.untrusted` and never reaches `Trusted`. Supply
+reported `cawg.x509.credential.untrusted` and never reaches `Trusted`. Supply
 `cawgTrust` to control that policy, or set `enableCawgIdentityTrustVerification: true`
 to reuse the resolved C2PA trust list for the identity as well:
 
@@ -143,28 +177,9 @@ const bridge = new C2paHlsBridge({
 This is opt-in: leaving it off keeps the stricter standard default (identity
 untrusted unless an explicit `cawgTrust` is configured).
 
-#### Engine difference: how an untrusted identity is reported
-
-The two engines agree on the *state* — a present but untrusted CAWG identity is
-gating and caps the asset below `Trusted` either way — but they differ in how
-they say so:
-
-| Engine | Reported status |
-|---|---|
-| WebCrypto (`enableExperimentalWebCrypto: true`) | the differentiated `cawg.identity.untrusted`, on the identity URL |
-| WASM (default) | the generic `signingCredential.untrusted`, indistinguishable from an untrusted C2PA claim signer |
-
-So on the default WASM path you cannot tell from the status code whether it was
-the C2PA claim signer or the CAWG identity signer that failed the trust check.
-This is upstream behaviour, not a bridge limitation: the differentiation is
-proposed in [c2pa-rs#2248](https://github.com/contentauth/c2pa-rs/pull/2248)
-(issue [#2247](https://github.com/contentauth/c2pa-rs/issues/2247)) and is not
-merged, so no released `@contentauth/c2pa-web` carries it —
-`@nettrek/c2pa-web-crypto` implements the proposed model directly. If you need
-the distinction on the WASM path before upstream lands it, point
-`@contentauth/c2pa-web` at a patched build via your package manager's
-`overrides`/`resolutions`; the bridge deliberately depends on the stock
-release.
+Both engines report an untrusted X.509 identity with the CAWG Identity 1.3 code
+`cawg.x509.credential.untrusted` on the identity URL (c2pa-rs ≥ 0.91), distinct from an
+untrusted C2PA claim signer (`signingCredential.untrusted`).
 
 ### Vite / bundler WASM override
 
@@ -215,7 +230,10 @@ interface C2PAConfig {
   enableExperimentalWebCrypto?: boolean          // opt into the WebCrypto engine; default false (WASM)
   enableCawgIdentityTrustVerification?: boolean  // judge the CAWG identity against the C2PA trust list too
   wasmSrc?: string        // override WASM URL (e.g. for Vite)
-  trust?: TrustSettings   // custom C2PA trust — skips remote fetch when set
+  workerSrc?: URL         // hosted c2pa_worker script, for a CSP without blob: workers
+  trustLists?: { official?: boolean, interim?: boolean } // bundled lists, both default true
+  trust?: TrustSettings   // custom C2PA signer trust instead of the bundled lists
+  tsaTrust?: TrustSettings // custom time-stamp authority trust instead of the bundled lists
   cawgTrust?: TrustSettings
 }
 
@@ -258,6 +276,7 @@ class C2paManifestHelper {
 
   // Serialisation
   crJson(): Promise<any>    // canonical crJSON (c2pa-web ≥ 0.8.0)
+  dispose(): void           // frees the engine reader; the bridge calls it on replace/dispose
   toString(): string        // pretty-printed JSON of the manifest store
 }
 ```
