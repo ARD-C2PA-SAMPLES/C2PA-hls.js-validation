@@ -72,8 +72,12 @@ export class C2paHlsBridge extends AbstractC2PABridge {
     }
 
     override dispose (): void {
-        super.dispose()
         this.#hlsInstance.off(Events.FRAG_LOADING, this.#onFragLoading)
+        for (const entry of Object.values(this.#fragValidationMap)) {
+            for (const item of entry.timeCodeMappingTree.items) item.value.manifestReader.dispose()
+        }
+        this.#fragValidationMap = {}
+        super.dispose()
     }
 
     /**
@@ -234,6 +238,7 @@ export class C2paHlsBridge extends AbstractC2PABridge {
                         if (seg.interval.low === interval.low && seg.interval.high === interval.high) {
                             this.warn(`[${levelKey}] Duplicate interval found – replacing`)
                             entry.timeCodeMappingTree.remove(interval, seg)
+                            seg.manifestReader.dispose()
                         }
                     })
 

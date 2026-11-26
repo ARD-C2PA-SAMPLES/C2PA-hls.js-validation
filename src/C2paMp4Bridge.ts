@@ -31,6 +31,8 @@ export class C2paMp4Bridge extends AbstractC2PABridge {
     }
 
     override dispose (): void {
+        this.#manifestReader?.dispose()
+        this.#manifestReader = null
         super.dispose()
     }
 

@@ -151,7 +151,24 @@ function pickIngredientThumbnail (ingredient: C2paIngredient, source: Manifest |
  * Provides helpers for signature presence, validation status, custom metadata, and formatted output.
  */
 export class C2paManifestHelper {
-    constructor (private readonly store: ManifestStore, private readonly reader?: Reader) {
+    #reader?: Reader
+
+    constructor (private readonly store: ManifestStore, reader?: Reader) {
+        this.#reader = reader
+    }
+
+    private get reader (): Reader | undefined {
+        return this.#reader
+    }
+
+    /**
+     * Releases the underlying {@link Reader}; the WASM engine keeps each reader alive in its
+     * worker until freed. Store accessors keep working, `crJson`/thumbnails return `null`.
+     */
+    dispose (): void {
+        const reader = this.#reader
+        this.#reader = undefined
+        void reader?.free().catch(() => {})
     }
 
     /**
