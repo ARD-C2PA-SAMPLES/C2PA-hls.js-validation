@@ -11,6 +11,7 @@ import { type C2paManifestHelper } from './C2paManifestHelper'
 import { type NamedLogger, withNamedLogger } from './utils/NamedLogger'
 import { createEngine } from './engine/createEngine'
 import { type C2paEngine } from './engine/C2paEngine'
+import { resolveTrustSettings } from './trust/trustSettings'
 
 export interface C2PAConfig {
     enableTrustListVerification: boolean
@@ -34,11 +35,23 @@ export interface C2PAConfig {
      */
     workerSrc?: URL
     /**
-     * Custom C2PA trust settings. When provided together with `enableTrustListVerification: true`,
-     * these are used directly instead of fetching the default list from the Content
-     * Credentials trust store (`verify.contentauthenticity.org/trust/*`).
+     * Bundled trust lists used with `enableTrustListVerification: true` (no runtime download).
+     * `official`: the C2PA Trust List and C2PA TSA Trust List, which C2PA 2.4 requires.
+     * `interim`: the frozen CAI interim list (signer + TSA anchors, allow-list), which current
+     * publisher signers still depend on. Both default to `true`.
+     */
+    trustLists?: { official?: boolean, interim?: boolean }
+    /**
+     * Custom C2PA signer trust settings, used instead of the bundled lists. Only applies
+     * with `enableTrustListVerification: true`.
      */
     trust?: TrustSettings
+    /**
+     * Custom time-stamp authority trust settings, used instead of the bundled TSA lists.
+     * Only applies with `enableTrustListVerification: true`; without trust verification no
+     * time stamp is trusted, as in c2pa-rs.
+     */
+    tsaTrust?: TrustSettings
     /**
      * Custom CAWG identity trust settings. Merged into the SDK settings when provided.
      */
@@ -121,55 +134,6 @@ export class AbstractC2PABridge implements NamedLogger, C2paBridge {
     }
 
     /**
-     * Fetches a trust-related resource file from the Content Credentials trust store.
-     *
-     * Uses the canonical verifier host directly: `contentcredentials.org/trust/*`
-     * 301-redirects here and serves no CORS headers (so a browser fetch is blocked
-     * by the redirect), whereas `verify.contentauthenticity.org` responds 200 with
-     * `Access-Control-Allow-Origin: *`.
-     *
-     * @param file - The name of the file to load (e.g., 'anchors.pem', 'allowed.sha256.txt').
-     * @returns A promise resolving to the content of the requested file as a string.
-     */
-    private async loadTrustResource (file: string): Promise<string> {
-        const res = await fetch(`https://verify.contentauthenticity.org/trust/${file}`)
-
-        return await res.text()
-    }
-
-    /**
-     * Loads all required trust configuration resources in parallel and
-     * constructs a `ToolkitSettings` object for trust verification.
-     *
-     * Downloads:
-     * - `anchors.pem`: Trust anchor certificates
-     * - `allowed.sha256.txt`: Hashes of allowed content
-     * - `store.cfg`: Trust store configuration
-     *
-     * @returns A promise that resolves to a fully populated `ToolkitSettings` object
-     *          used for C2PA signature verification.
-     */
-    private async getToolkitSettings (): Promise<Settings> {
-        const trust: TrustSettings = this.config.trust ?? await this.loadRemoteTrustSettings()
-        // Explicit cawgTrust wins; otherwise reuse the C2PA trust list for the
-        // CAWG identity only when opted in (see `enableCawgIdentityTrustVerification`).
-        const cawgTrust = this.config.cawgTrust ??
-            (this.config.enableCawgIdentityTrustVerification ? trust : undefined)
-        return {
-            trust,
-            ...(cawgTrust ? { cawgTrust } : {}),
-            verify: { verifyTrust: true }
-        }
-    }
-
-    private async loadRemoteTrustSettings (): Promise<TrustSettings> {
-        const [trustAnchors, allowedList, trustConfig] = await Promise.all(
-            ['anchors.pem', 'allowed.sha256.txt', 'store.cfg'].map(f => this.loadTrustResource(f))
-        )
-        return { trustAnchors, allowedList, trustConfig }
-    }
-
-    /**
      * Asynchronously initializes the C2PA runtime by loading the WebAssembly module
      * and spawning a dedicated validation worker.
      *
@@ -180,7 +144,7 @@ export class AbstractC2PABridge implements NamedLogger, C2paBridge {
         setTimeout(async () => {
             try {
                 if (this.config.enableTrustListVerification) {
-                    this.c2paTookitSettings = await this.getToolkitSettings()
+                    this.c2paTookitSettings = await resolveTrustSettings(this.config)
                 }
                 this.c2pa = await createEngine(this.config, this.c2paTookitSettings ?? undefined, (...args) => { this.warn(...args) })
 

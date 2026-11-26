@@ -26,6 +26,14 @@
       "types": "./dist/helpers/index.d.ts",
       "import": "./dist/helpers/index.js"
     },
+    "./trust/official": {
+      "types": "./dist/trust/official.d.ts",
+      "import": "./dist/trust/official.js"
+    },
+    "./trust/interim": {
+      "types": "./dist/trust/interim.d.ts",
+      "import": "./dist/trust/interim.js"
+    },
     "./package.json": "./package.json"
   },
   "types": "./dist/index.d.ts",
@@ -44,7 +52,9 @@
     "build:types": "tsc -p tsconfig.types.json",
     "build": "npm run clean && npm run build:js && npm run build:types",
     "preview": "npx http-server dist -c-1 --port 5173",
-    "prepublishOnly": "npm run build"
+    "gen:trust-lists": "node scripts/gen-trust-lists.mjs",
+    "check:trust-lists": "node scripts/check-trust-lists.mjs",
+    "prepublishOnly": "npm run check:trust-lists && npm run build"
   },
   "peerDependencies": {
     "hls.js": "^1.6.7"
